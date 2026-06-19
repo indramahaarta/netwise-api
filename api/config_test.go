@@ -35,8 +35,14 @@ func TestHandlerServesJSON200(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
 		t.Fatalf("response body not valid config: %v", err)
 	}
-	if c.Limits.Wallets < 0 {
-		t.Fatalf("served wallets limit negative")
+	if c.SchemaVersion != 1 {
+		t.Fatalf("expected schemaVersion 1, got %d", c.SchemaVersion)
+	}
+	if c.Limits.Wallets <= 0 {
+		t.Fatalf("expected a positive served wallets limit, got %d", c.Limits.Wallets)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=300" {
+		t.Fatalf("expected Cache-Control public, max-age=300, got %q", cc)
 	}
 }
 
@@ -53,6 +59,13 @@ func TestHandlerHonorsIfNoneMatch(t *testing.T) {
 
 	if rec2.Code != http.StatusNotModified {
 		t.Fatalf("expected 304 for matching ETag, got %d", rec2.Code)
+	}
+	// RFC 7232: a 304 must still carry the cache-validating headers.
+	if rec2.Header().Get("ETag") != etag {
+		t.Fatalf("expected ETag on 304 response")
+	}
+	if cc := rec2.Header().Get("Cache-Control"); cc != "public, max-age=300" {
+		t.Fatalf("expected Cache-Control on 304 response, got %q", cc)
 	}
 }
 

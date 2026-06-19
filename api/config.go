@@ -56,13 +56,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(configJSON))
 	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "public, max-age=300")
 	if match := r.Header.Get("If-None-Match"); match == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "public, max-age=300")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(configJSON)
 }
