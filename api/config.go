@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-//go:embed config.json
+//go:embed appconfig.json
 var configJSON []byte
 
 type configLimits struct {
