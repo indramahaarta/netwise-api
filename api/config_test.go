@@ -17,6 +17,30 @@ func TestEmbeddedConfigIsValid(t *testing.T) {
 	}
 }
 
+func TestServesOnOpenPaywallField(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	Handler(rec, req)
+
+	// The field must be present in the served body so the iOS app reads it
+	// rather than falling back to its bundled default.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("response not an object: %v", err)
+	}
+	if _, ok := raw["onOpenPaywallEnabled"]; !ok {
+		t.Fatalf("served config missing onOpenPaywallEnabled field")
+	}
+
+	var c appConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
+		t.Fatalf("response body not valid config: %v", err)
+	}
+	if c.OnOpenPaywallEnabled {
+		t.Fatalf("expected onOpenPaywallEnabled false in the shipped config")
+	}
+}
+
 func TestHandlerServesJSON200(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	rec := httptest.NewRecorder()

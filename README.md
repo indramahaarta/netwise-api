@@ -12,6 +12,9 @@ owns the `/api/config` route, so an `api/config.json` beside it is rejected as a
 conflicting path. `appconfig.json` is embedded into the function via `go:embed`.
 
 Feature states: `all` (everyone), `premium` (premium only), `off` (hidden for all).
+
+`onOpenPaywallEnabled` (bool) controls the launch paywall shown to non-premium
+users: `false` disables it, `true` re-enables it (premium users never see it).
 A malformed `appconfig.json` makes the endpoint return 500; the iOS app then keeps
 its last-good cache or bundled defaults, so a bad deploy never breaks clients.
 

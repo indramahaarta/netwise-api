@@ -22,6 +22,9 @@ type appConfig struct {
 	SchemaVersion int               `json:"schemaVersion"`
 	Limits        configLimits      `json:"limits"`
 	Features      map[string]string `json:"features"`
+	// OnOpenPaywallEnabled gates the launch paywall shown to non-premium users.
+	// Absent → false (paywall off). A bool needs no validation.
+	OnOpenPaywallEnabled bool `json:"onOpenPaywallEnabled"`
 }
 
 var validStates = map[string]bool{"all": true, "premium": true, "off": true}

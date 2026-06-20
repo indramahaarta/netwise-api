@@ -10,5 +10,6 @@
     "dashboardSavingsRate": "premium",
     "dashboardLargestExpenses": "premium",
     "emailAutoCapture": "off"
-  }
+  },
+  "onOpenPaywallEnabled": false
 }
