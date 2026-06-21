@@ -9,7 +9,8 @@
     "dashboardSpendingByTag": "premium",
     "dashboardSavingsRate": "premium",
     "dashboardLargestExpenses": "premium",
-    "emailAutoCapture": "off"
+    "emailAutoCapture": "off",
+    "aiCapture": "all"
   },
   "onOpenPaywallEnabled": false
 }
