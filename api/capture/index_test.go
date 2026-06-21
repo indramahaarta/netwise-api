@@ -99,6 +99,19 @@ func TestCaptureReturns502OnExtractorError(t *testing.T) {
 	}
 }
 
+func TestSystemPromptIncludesHoldings(t *testing.T) {
+	p := buildSystemPrompt(captureRequest{
+		Portfolios: []portfolioRef{{Name: "US Stocks", Holdings: []string{"INTC", "AAPL"}}},
+		Wallets:    []walletRef{{Name: "Jago"}},
+		Categories: []categoryRef{{Name: "Food"}},
+	})
+	for _, s := range []string{"US Stocks", "INTC", "AAPL", "Jago", "Food"} {
+		if !strings.Contains(p, s) {
+			t.Fatalf("prompt missing %q", s)
+		}
+	}
+}
+
 var errFakeExtractorFailed = &testError{msg: "fake extractor failed"}
 
 type testError struct {
