@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"os"
+	"unicode/utf8"
 )
 
 const maxCaptureTextChars = 10000
@@ -87,7 +89,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := r.Header.Get("X-NetWise-Key")
-	if captureSecret == "" || subtle.ConstantTimeCompare([]byte(key), []byte(captureSecret)) != 1 {
+	if !secretMatches(key, captureSecret) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -98,7 +100,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Text) == 0 || len(req.Text) > maxCaptureTextChars {
+	if len(req.Text) == 0 || utf8.RuneCountInString(req.Text) > maxCaptureTextChars {
 		http.Error(w, "text length out of range", http.StatusBadRequest)
 		return
 	}
@@ -120,6 +122,17 @@ type claudeExtractor struct{}
 
 func (claudeExtractor) extract(ctx requestContext, req captureRequest) (captureResult, error) {
 	return callClaude(ctx, req)
+}
+
+// secretMatches compares provided and expected secrets in constant time.
+// Both are hashed to fixed length first to avoid leaking the expected secret's length.
+func secretMatches(provided, expected string) bool {
+	if expected == "" {
+		return false
+	}
+	p := sha256.Sum256([]byte(provided))
+	e := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(p[:], e[:]) == 1
 }
 
 // callClaude is a placeholder — replaced by the real implementation in Task 2.

@@ -87,3 +87,24 @@ type fakeExtractor struct {
 func (f fakeExtractor) extract(_ requestContext, _ captureRequest) (captureResult, error) {
 	return f.result, f.err
 }
+
+func TestCaptureReturns502OnExtractorError(t *testing.T) {
+	prev := defaultExtractor
+	defaultExtractor = fakeExtractor{err: errFakeExtractorFailed}
+	defer func() { defaultExtractor = prev }()
+
+	rec := postCapture(t, `{"text":"KFC Rp45000","wallets":[{"id":"w1","name":"Jago","currency":"IDR"}]}`, "test-secret")
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 on extractor error, got %d", rec.Code)
+	}
+}
+
+var errFakeExtractorFailed = &testError{msg: "fake extractor failed"}
+
+type testError struct {
+	msg string
+}
+
+func (e *testError) Error() string {
+	return e.msg
+}
