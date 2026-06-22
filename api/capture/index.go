@@ -34,7 +34,6 @@ type categoryRef struct {
 type portfolioRef struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
-	Currency string   `json:"currency"`
 	Market   string   `json:"market"`
 	Holdings []string `json:"holdings"`
 }
@@ -50,7 +49,6 @@ type walletExtraction struct {
 	TargetWalletID string  `json:"targetWalletId"`
 	Direction      string  `json:"direction"`
 	Amount         string  `json:"amount"`
-	CurrencyCode   *string `json:"currencyCode"`
 	CategoryName   *string `json:"categoryName"`
 	Note           *string `json:"note"`
 	DateTime       *string `json:"dateTime"`
@@ -63,7 +61,6 @@ type portfolioExtraction struct {
 	Quantity          string  `json:"quantity"`
 	PricePerShare     string  `json:"pricePerShare"`
 	Fee               *string `json:"fee"`
-	CurrencyCode      *string `json:"currencyCode"`
 	Note              *string `json:"note"`
 	DateTime          *string `json:"dateTime"`
 }
@@ -197,10 +194,9 @@ func extractionTool() anthropic.ToolParam {
 				"description": "\"expense\" for money leaving the wallet, \"income\" for money arriving.",
 			},
 			"amount":       str("Transaction amount as plain digits only, no thousands separators or currency symbol (e.g. \"45000\")."),
-			"currencyCode": str("ISO currency code if explicitly shown, else omit."),
-			"categoryName": str("EXACT category name from the provided list, or omit if none matches."),
-			"note":         str("Short merchant/description note, or omit."),
-			"dateTime":     str("ISO-8601 date-time if present, or omit."),
+			"categoryName": str("Best-matching category from the provided list, inferred from the merchant/description (e.g. a restaurant like KFC → \"Food\"). Copy the name EXACTLY from the list. Omit only if no category reasonably applies."),
+			"note":         str("Short description, usually the merchant or payee named in the text (e.g. \"KFC\"). Omit only if none is present."),
+			"dateTime":     str("Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). Omit only if no date or time appears in the text."),
 		},
 		"required": []any{"targetWalletId", "direction", "amount"},
 	}
@@ -219,9 +215,8 @@ func extractionTool() anthropic.ToolParam {
 			"quantity":      str("Number of shares/units as plain digits."),
 			"pricePerShare": str("Price per share/unit as plain digits."),
 			"fee":           str("Fee as plain digits, or omit."),
-			"currencyCode":  str("ISO currency code if explicitly shown, else omit."),
-			"note":          str("Short note, or omit."),
-			"dateTime":      str("ISO-8601 date-time if present, or omit."),
+			"note":          str("Short note, usually the merchant/broker named in the text. Omit only if none is present."),
+			"dateTime":      str("Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). Omit only if no date or time appears in the text."),
 		},
 		"required": []any{"targetPortfolioId", "type", "symbol", "quantity", "pricePerShare"},
 	}
@@ -296,8 +291,10 @@ func buildSystemPrompt(req captureRequest) string {
 	b.WriteString("\nRules:\n")
 	b.WriteString("- Choose targetWalletId/targetPortfolioId ONLY from the provided lists.\n")
 	b.WriteString("- For a sold/bought ticker, pick the portfolio whose holdings contains it.\n")
-	b.WriteString("- Never guess unreadable fields — use null (omit them).\n")
-	b.WriteString("- categoryName must be EXACT from the list or null.\n")
+	b.WriteString("- Extract every field whose information is present in the text. Normalizing it is expected, not guessing: " +
+		"reformat any date/time into ISO-8601 and infer the best-fit category from the merchant (KFC → \"Food\"). " +
+		"Use null ONLY when the underlying information is genuinely absent.\n")
+	b.WriteString("- categoryName must be copied EXACTLY from the provided list (do not invent new names).\n")
 	b.WriteString("- amount/quantity/pricePerShare/fee are plain-digit strings (no separators or symbols).\n")
 	b.WriteString("- If the text is not a single clear transaction, set isTransaction to false.\n")
 
