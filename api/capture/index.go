@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -111,6 +112,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	result, err := defaultExtractor.extract(r.Context(), req)
 	if err != nil {
+		log.Printf("capture: extractor failed: %v", err)
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}
@@ -239,8 +241,8 @@ func extractionTool() anthropic.ToolParam {
 					"description": "\"wallet\" for everyday spending/income; \"portfolio\" for buying/selling securities.",
 				},
 				"confidence": map[string]any{
-					"type": "number", "minimum": 0, "maximum": 1,
-					"description": "Confidence from 0 to 1 in this extraction.",
+					"type":        "number",
+					"description": "Confidence in this extraction, from 0 to 1.",
 				},
 				"wallet":    walletSchema,
 				"portfolio": portfolioSchema,
