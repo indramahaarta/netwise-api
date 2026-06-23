@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -43,26 +44,36 @@ type captureRequest struct {
 	Wallets    []walletRef    `json:"wallets"`
 	Categories []categoryRef  `json:"categories"`
 	Portfolios []portfolioRef `json:"portfolios"`
+	// Now is the client's current local date/time as a timezone-less ISO-8601
+	// string ("2006-01-02T15:04:05"). Used as the fallback for the now-required
+	// wallet dateTime when the text carries no date — supplied by the client so
+	// the fallback is in the user's wall-clock, not the server's UTC.
+	Now string `json:"now"`
 }
 
 type walletExtraction struct {
-	TargetWalletID string  `json:"targetWalletId"`
-	Direction      string  `json:"direction"`
-	Amount         string  `json:"amount"`
-	CategoryName   *string `json:"categoryName"`
-	Note           *string `json:"note"`
-	DateTime       *string `json:"dateTime"`
+	TargetWalletID string `json:"targetWalletId"`
+	Direction      string `json:"direction"`
+	Amount         string `json:"amount"`
+	// CategoryName and DateTime are required (see walletSchema) so Claude always
+	// fills them — best-fit category and the transaction date — leaving the
+	// confirm form with fewer empty fields. Note stays optional.
+	CategoryName string  `json:"categoryName"`
+	Note         *string `json:"note"`
+	DateTime     string  `json:"dateTime"`
 }
 
 type portfolioExtraction struct {
-	TargetPortfolioID string  `json:"targetPortfolioId"`
-	Type              string  `json:"type"`
-	Symbol            string  `json:"symbol"`
-	Quantity          string  `json:"quantity"`
-	PricePerShare     string  `json:"pricePerShare"`
-	Fee               *string `json:"fee"`
-	Note              *string `json:"note"`
-	DateTime          *string `json:"dateTime"`
+	TargetPortfolioID string `json:"targetPortfolioId"`
+	Type              string `json:"type"`
+	Symbol            string `json:"symbol"`
+	Quantity          string `json:"quantity"`
+	PricePerShare     string `json:"pricePerShare"`
+	// DateTime is required (see portfolioSchema); fee and note stay optional —
+	// a trade often has no fee, and forcing one would fabricate a value.
+	Fee      *string `json:"fee"`
+	Note     *string `json:"note"`
+	DateTime string  `json:"dateTime"`
 }
 
 type captureResult struct {
@@ -194,11 +205,11 @@ func extractionTool() anthropic.ToolParam {
 				"description": "\"expense\" for money leaving the wallet, \"income\" for money arriving.",
 			},
 			"amount":       str("Transaction amount as plain digits only, no thousands separators or currency symbol (e.g. \"45000\")."),
-			"categoryName": str("Best-matching category from the provided list, inferred from the merchant/description (e.g. a restaurant like KFC → \"Food\"). Copy the name EXACTLY from the list. Omit only if no category reasonably applies."),
+			"categoryName": str("REQUIRED. The best-matching category from the provided list, inferred from the merchant/description (e.g. a restaurant like KFC → \"Food\"). Copy the name EXACTLY from the list. Always pick the closest one; if nothing fits well, choose the most general expense/income category available."),
 			"note":         str("Short description, usually the merchant or payee named in the text (e.g. \"KFC\"). Omit only if none is present."),
-			"dateTime":     str("Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). Omit only if no date or time appears in the text."),
+			"dateTime":     str("REQUIRED. Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). If the text contains no date/time, use the current date/time given in the prompt."),
 		},
-		"required": []any{"targetWalletId", "direction", "amount"},
+		"required": []any{"targetWalletId", "direction", "amount", "categoryName", "dateTime"},
 	}
 
 	portfolioSchema := map[string]any{
@@ -216,9 +227,9 @@ func extractionTool() anthropic.ToolParam {
 			"pricePerShare": str("Price per share/unit as plain digits."),
 			"fee":           str("Fee as plain digits, or omit."),
 			"note":          str("Short note, usually the merchant/broker named in the text. Omit only if none is present."),
-			"dateTime":      str("Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). Omit only if no date or time appears in the text."),
+			"dateTime":      str("REQUIRED. Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). If the text contains no date/time, use the current date/time given in the prompt."),
 		},
-		"required": []any{"targetPortfolioId", "type", "symbol", "quantity", "pricePerShare"},
+		"required": []any{"targetPortfolioId", "type", "symbol", "quantity", "pricePerShare", "dateTime"},
 	}
 
 	return anthropic.ToolParam{
@@ -256,6 +267,14 @@ func buildSystemPrompt(req captureRequest) string {
 	b.WriteString("You extract a single financial transaction from OCR text of a receipt, " +
 		"bank notification, or brokerage confirmation, and record it via the record_transaction tool.\n\n")
 
+	// Current date/time fallback for the now-required wallet dateTime. Prefer the
+	// client's local clock (req.Now); fall back to server UTC if absent.
+	now := strings.TrimSpace(req.Now)
+	if now == "" {
+		now = time.Now().UTC().Format("2006-01-02T15:04:05")
+	}
+	b.WriteString(fmt.Sprintf("Current date/time (user's local): %s\n\n", now))
+
 	b.WriteString("Wallets (id — name — currency):\n")
 	if len(req.Wallets) == 0 {
 		b.WriteString("  (none)\n")
@@ -292,11 +311,15 @@ func buildSystemPrompt(req captureRequest) string {
 	b.WriteString("- Choose targetWalletId/targetPortfolioId ONLY from the provided lists.\n")
 	b.WriteString("- For a sold/bought ticker, pick the portfolio whose holdings contains it.\n")
 	b.WriteString("- Extract every field whose information is present in the text. Normalizing it is expected, not guessing: " +
-		"reformat any date/time into ISO-8601 and infer the best-fit category from the merchant (KFC → \"Food\"). " +
-		"Use null ONLY when the underlying information is genuinely absent.\n")
-	b.WriteString("- categoryName must be copied EXACTLY from the provided list (do not invent new names).\n")
+		"reformat any date/time into ISO-8601 and infer the best-fit category from the merchant (KFC → \"Food\").\n")
+	b.WriteString("- dateTime is REQUIRED for every transaction (wallet and portfolio) — if the text has no " +
+		"date/time, use the current date/time given above.\n")
+	b.WriteString("- For a wallet transaction, categoryName is also REQUIRED — pick the closest category from the " +
+		"list (copy the name EXACTLY; never invent a new one).\n")
 	b.WriteString("- amount/quantity/pricePerShare/fee are plain-digit strings (no separators or symbols).\n")
-	b.WriteString("- If the text is not a single clear transaction, set isTransaction to false.\n")
+	b.WriteString("- Only set isTransaction true for a clear, concrete financial transaction. For anything else — a " +
+		"random photo, a menu, an article, a chat, or text too garbled to read — set isTransaction to false, give a " +
+		"low confidence, and omit BOTH the wallet and portfolio objects. Never invent a transaction that isn't there.\n")
 
 	return b.String()
 }
