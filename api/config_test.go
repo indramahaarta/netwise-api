@@ -151,6 +151,28 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+func TestParseUserAgent(t *testing.T) {
+	cases := []struct {
+		ua          string
+		wantEnv     string
+		wantVersion string
+	}{
+		{"NetWise/1.0.2 (build 47; testflight; iOS 17.5)", "testflight", "1.0.2"},
+		{"NetWise/1.0.0 (build 12; debug; iOS 18.0)", "debug", "1.0.0"},
+		{"NetWise/2.1.0 (build 90; appstore; iOS 17.4)", "appstore", "2.1.0"},
+		{"", "", ""},                          // no header
+		{"Mozilla/5.0", "", ""},               // unrelated UA
+		{"NetWise/1.0.2", "", "1.0.2"},        // version only, no env comment
+	}
+	for _, c := range cases {
+		env, version := parseUserAgent(c.ua)
+		if env != c.wantEnv || version != c.wantVersion {
+			t.Fatalf("parseUserAgent(%q) = (%q,%q), want (%q,%q)",
+				c.ua, env, version, c.wantEnv, c.wantVersion)
+		}
+	}
+}
+
 func equalInts(a, b []int) bool {
 	if len(a) != len(b) {
 		return false

@@ -31,6 +31,32 @@ type appConfig struct {
 
 var validStates = map[string]bool{"all": true, "premium": true, "off": true}
 
+// knownEnvs are the only environment keywords recognized in the UA and in
+// override match rules.
+var knownEnvs = []string{"debug", "testflight", "appstore"}
+
+// parseUserAgent extracts the app version and environment from a NetWise
+// User-Agent. A missing or unrecognized UA yields empty strings, which makes
+// every version- or env-bounded override fail to match (backward compatibility).
+func parseUserAgent(ua string) (env, version string) {
+	const prefix = "NetWise/"
+	if i := strings.Index(ua, prefix); i >= 0 {
+		rest := ua[i+len(prefix):]
+		if j := strings.IndexAny(rest, " \t"); j >= 0 {
+			version = rest[:j]
+		} else {
+			version = rest
+		}
+	}
+	for _, e := range knownEnvs {
+		if strings.Contains(ua, e) {
+			env = e
+			break
+		}
+	}
+	return env, version
+}
+
 // validate returns an error if the embedded config is structurally unusable.
 func validate(c appConfig) error {
 	if c.SchemaVersion < 1 {
