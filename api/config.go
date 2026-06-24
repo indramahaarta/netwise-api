@@ -25,8 +25,9 @@ type appConfig struct {
 	Limits        configLimits      `json:"limits"`
 	Features      map[string]string `json:"features"`
 	// OnOpenPaywallEnabled gates the launch paywall shown to non-premium users.
-	// Absent → false (paywall off). A bool needs no validation.
-	OnOpenPaywallEnabled bool `json:"onOpenPaywallEnabled"`
+	OnOpenPaywallEnabled bool       `json:"onOpenPaywallEnabled"`
+	// Overrides are evaluated server-side and never served to clients.
+	Overrides []override `json:"overrides"`
 }
 
 var validStates = map[string]bool{"all": true, "premium": true, "off": true}
@@ -138,4 +139,84 @@ func compareVersions(a, b []int) int {
 		}
 	}
 	return 0
+}
+
+type matchRule struct {
+	Env        string `json:"env"`
+	MinVersion string `json:"minVersion"`
+	MaxVersion string `json:"maxVersion"`
+}
+
+type override struct {
+	Match                matchRule         `json:"match"`
+	Features             map[string]string `json:"features"`
+	Limits               map[string]int    `json:"limits"`
+	OnOpenPaywallEnabled *bool             `json:"onOpenPaywallEnabled"`
+}
+
+// applies reports whether every present field of the rule matches the request.
+// Version-bounded rules fail closed when the client version can't be parsed.
+func (m matchRule) applies(env, version string) bool {
+	if m.Env != "" && m.Env != env {
+		return false
+	}
+	if m.MinVersion != "" || m.MaxVersion != "" {
+		cv, ok := parseVersion(version)
+		if !ok {
+			return false
+		}
+		if m.MinVersion != "" {
+			bv, bok := parseVersion(m.MinVersion)
+			if !bok || compareVersions(cv, bv) < 0 {
+				return false
+			}
+		}
+		if m.MaxVersion != "" {
+			bv, bok := parseVersion(m.MaxVersion)
+			if !bok || compareVersions(cv, bv) > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// setLimit applies a single named limit onto the struct, ignoring unknown keys.
+func setLimit(l *configLimits, key string, v int) {
+	switch key {
+	case "wallets":
+		l.Wallets = v
+	case "portfolios":
+		l.Portfolios = v
+	case "categories":
+		l.Categories = v
+	case "tags":
+		l.Tags = v
+	}
+}
+
+// resolve merges every matching override onto a copy of base, in array order
+// (later match wins), then clears Overrides so they are never served.
+func resolve(base appConfig, env, version string) appConfig {
+	out := base
+	out.Features = make(map[string]string, len(base.Features))
+	for k, v := range base.Features {
+		out.Features[k] = v
+	}
+	for _, o := range base.Overrides {
+		if !o.Match.applies(env, version) {
+			continue
+		}
+		for k, v := range o.Features {
+			out.Features[k] = v
+		}
+		for k, v := range o.Limits {
+			setLimit(&out.Limits, k, v)
+		}
+		if o.OnOpenPaywallEnabled != nil {
+			out.OnOpenPaywallEnabled = *o.OnOpenPaywallEnabled
+		}
+	}
+	out.Overrides = nil
+	return out
 }
