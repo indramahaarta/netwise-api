@@ -10,8 +10,13 @@
     "dashboardSavingsRate": "premium",
     "dashboardLargestExpenses": "premium",
     "emailAutoCapture": "off",
-    "aiCapture": "all"
+    "aiCapture": "off"
   },
   "onOpenPaywallEnabled": false,
-  "overrides": []
+  "overrides": [
+    {
+      "match": { "minVersion": "1.0.2" },
+      "features": { "aiCapture": "all" }
+    }
+  ]
 }
