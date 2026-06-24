@@ -25,6 +25,7 @@ type appConfig struct {
 	Limits        configLimits      `json:"limits"`
 	Features      map[string]string `json:"features"`
 	// OnOpenPaywallEnabled gates the launch paywall shown to non-premium users.
+	// Absent → false (paywall off). A bool needs no validation.
 	OnOpenPaywallEnabled bool       `json:"onOpenPaywallEnabled"`
 	// Overrides are evaluated server-side and never served to clients.
 	Overrides []override `json:"overrides,omitempty"`
