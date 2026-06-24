@@ -106,3 +106,59 @@ func TestValidateRejectsNegativeLimit(t *testing.T) {
 		t.Fatalf("expected validation error for negative limit")
 	}
 }
+
+func TestParseVersion(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []int
+		ok   bool
+	}{
+		{"1.0.2", []int{1, 0, 2}, true},
+		{"1.0", []int{1, 0}, true},
+		{"10", []int{10}, true},
+		{"", nil, false},
+		{"1.x.0", nil, false},
+		{"1..2", nil, false},
+	}
+	for _, c := range cases {
+		got, ok := parseVersion(c.in)
+		if ok != c.ok {
+			t.Fatalf("parseVersion(%q) ok = %v, want %v", c.in, ok, c.ok)
+		}
+		if ok && !equalInts(got, c.want) {
+			t.Fatalf("parseVersion(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestCompareVersions(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"1.0.2", "1.0.10", -1}, // numeric, not lexical
+		{"1.0.10", "1.0.2", 1},
+		{"1.0", "1.0.0", 0}, // zero-padding
+		{"2.0", "1.9.9", 1},
+		{"1.0.0", "1.0.0", 0},
+	}
+	for _, c := range cases {
+		av, _ := parseVersion(c.a)
+		bv, _ := parseVersion(c.b)
+		if got := compareVersions(av, bv); got != c.want {
+			t.Fatalf("compareVersions(%q,%q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

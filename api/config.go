@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 )
 
 //go:embed appconfig.json
@@ -68,4 +70,46 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(configJSON)
+}
+
+// parseVersion splits a dotted version into numeric components. Returns ok=false
+// for an empty string or any non-numeric component, so callers can fail closed.
+func parseVersion(s string) ([]int, bool) {
+	if s == "" {
+		return nil, false
+	}
+	parts := strings.Split(s, ".")
+	out := make([]int, len(parts))
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+// compareVersions returns -1, 0, or 1, padding the shorter slice with zeros.
+func compareVersions(a, b []int) int {
+	n := len(a)
+	if len(b) > n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		var av, bv int
+		if i < len(a) {
+			av = a[i]
+		}
+		if i < len(b) {
+			bv = b[i]
+		}
+		if av < bv {
+			return -1
+		}
+		if av > bv {
+			return 1
+		}
+	}
+	return 0
 }
