@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "limits": { "wallets": 6, "portfolios": 3, "categories": 8, "tags": 3 },
   "features": {
     "dashboardPerformanceMatrix": "premium",
@@ -12,5 +12,6 @@
     "emailAutoCapture": "off",
     "aiCapture": "all"
   },
-  "onOpenPaywallEnabled": false
+  "onOpenPaywallEnabled": false,
+  "overrides": []
 }

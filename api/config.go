@@ -27,10 +27,11 @@ type appConfig struct {
 	// OnOpenPaywallEnabled gates the launch paywall shown to non-premium users.
 	OnOpenPaywallEnabled bool       `json:"onOpenPaywallEnabled"`
 	// Overrides are evaluated server-side and never served to clients.
-	Overrides []override `json:"overrides"`
+	Overrides []override `json:"overrides,omitempty"`
 }
 
 var validStates = map[string]bool{"all": true, "premium": true, "off": true}
+var validEnvs = map[string]bool{"debug": true, "testflight": true, "appstore": true}
 
 // knownEnvs are the only environment keywords recognized in the UA and in
 // override match rules.
@@ -71,6 +72,21 @@ func validate(c appConfig) error {
 			return fmt.Errorf("feature %q has invalid state %q", k, v)
 		}
 	}
+	for i, o := range c.Overrides {
+		if o.Match.Env != "" && !validEnvs[o.Match.Env] {
+			return fmt.Errorf("override %d has unknown env %q", i, o.Match.Env)
+		}
+		for k, v := range o.Features {
+			if !validStates[v] {
+				return fmt.Errorf("override %d feature %q has invalid state %q", i, k, v)
+			}
+		}
+		for k, v := range o.Limits {
+			if v < 0 {
+				return fmt.Errorf("override %d limit %q is negative", i, k)
+			}
+		}
+	}
 	return nil
 }
 
@@ -86,9 +102,20 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(configJSON))
+	env, version := parseUserAgent(r.Header.Get("User-Agent"))
+	resolved := resolve(c, env, version)
+	body, err := json.Marshal(resolved)
+	if err != nil {
+		http.Error(w, "config marshal failed", http.StatusInternalServerError)
+		return
+	}
+
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(body))
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	// private: the body now varies by User-Agent, so only the requesting client
+	// may cache it. Shared/edge caching under "public" could leak one audience's
+	// config to another.
+	w.Header().Set("Cache-Control", "private, max-age=300")
 	if match := r.Header.Get("If-None-Match"); match == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -96,7 +123,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(configJSON)
+	_, _ = w.Write(body)
 }
 
 // parseVersion splits a dotted version into numeric components. Returns ok=false

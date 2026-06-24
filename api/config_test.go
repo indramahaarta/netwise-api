@@ -59,14 +59,14 @@ func TestHandlerServesJSON200(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
 		t.Fatalf("response body not valid config: %v", err)
 	}
-	if c.SchemaVersion != 1 {
-		t.Fatalf("expected schemaVersion 1, got %d", c.SchemaVersion)
+	if c.SchemaVersion != 2 {
+		t.Fatalf("expected schemaVersion 2, got %d", c.SchemaVersion)
 	}
 	if c.Limits.Wallets <= 0 {
 		t.Fatalf("expected a positive served wallets limit, got %d", c.Limits.Wallets)
 	}
-	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=300" {
-		t.Fatalf("expected Cache-Control public, max-age=300, got %q", cc)
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Fatalf("expected Cache-Control private, max-age=300, got %q", cc)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestHandlerHonorsIfNoneMatch(t *testing.T) {
 	if rec2.Header().Get("ETag") != etag {
 		t.Fatalf("expected ETag on 304 response")
 	}
-	if cc := rec2.Header().Get("Cache-Control"); cc != "public, max-age=300" {
+	if cc := rec2.Header().Get("Cache-Control"); cc != "private, max-age=300" {
 		t.Fatalf("expected Cache-Control on 304 response, got %q", cc)
 	}
 }
@@ -207,6 +207,63 @@ func TestMatchRuleApplies(t *testing.T) {
 		if got := c.m.applies(c.env, c.ver); got != c.want {
 			t.Fatalf("%s: applies(%q,%q) = %v, want %v", c.name, c.env, c.ver, got, c.want)
 		}
+	}
+}
+
+func TestValidateRejectsBadOverride(t *testing.T) {
+	bad := appConfig{
+		SchemaVersion: 2,
+		Features:      map[string]string{},
+		Overrides: []override{
+			{Match: matchRule{Env: "beta"}}, // unknown env keyword
+		},
+	}
+	if err := validate(bad); err == nil {
+		t.Fatalf("expected error for unknown override env")
+	}
+
+	bad2 := appConfig{
+		SchemaVersion: 2,
+		Features:      map[string]string{},
+		Overrides: []override{
+			{Features: map[string]string{"x": "sometimes"}}, // invalid state
+		},
+	}
+	if err := validate(bad2); err == nil {
+		t.Fatalf("expected error for invalid override feature state")
+	}
+}
+
+func TestHandlerResolvesByUserAgent(t *testing.T) {
+	// No UA → base config (smartInsights stays off in the shipped file).
+	reqBase := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	recBase := httptest.NewRecorder()
+	Handler(recBase, reqBase)
+	if recBase.Code != http.StatusOK {
+		t.Fatalf("base status = %d, want 200", recBase.Code)
+	}
+	if cc := recBase.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q, want private, max-age=300", cc)
+	}
+	var baseBody map[string]json.RawMessage
+	if err := json.Unmarshal(recBase.Body.Bytes(), &baseBody); err != nil {
+		t.Fatalf("base body not an object: %v", err)
+	}
+	if _, ok := baseBody["overrides"]; ok {
+		t.Fatalf("served body must not contain overrides")
+	}
+
+	// ETag from the base request must drive a 304 on re-request with same UA.
+	etag := recBase.Header().Get("ETag")
+	if etag == "" {
+		t.Fatalf("missing ETag")
+	}
+	req304 := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	req304.Header.Set("If-None-Match", etag)
+	rec304 := httptest.NewRecorder()
+	Handler(rec304, req304)
+	if rec304.Code != http.StatusNotModified {
+		t.Fatalf("conditional status = %d, want 304", rec304.Code)
 	}
 }
 
