@@ -118,6 +118,18 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-device daily quota. Checked BEFORE Claude so an over-limit request never
+	// reaches (or bills) the model; the counter is only incremented after success
+	// so failures don't burn quota. Old clients send no device header → allowed,
+	// uncounted (backward compatible).
+	deviceID := strings.TrimSpace(r.Header.Get("X-NetWise-Device"))
+	isPremium := r.Header.Get("X-NetWise-Premium") == "true"
+	decision, allowed := evaluateQuota(r.Context(), deviceID, isPremium, req.Now)
+	if !allowed {
+		writeDailyLimit(w, decision, isPremium)
+		return
+	}
+
 	result, err := defaultExtractor.extract(r.Context(), req)
 	if err != nil {
 		log.Printf("capture: extractor failed: %v", err)
@@ -125,6 +137,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	decision.recordSuccess(r.Context())
+	writeQuotaHeaders(w, decision)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(result)

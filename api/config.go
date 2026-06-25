@@ -26,7 +26,13 @@ type appConfig struct {
 	Features      map[string]string `json:"features"`
 	// OnOpenPaywallEnabled gates the launch paywall shown to non-premium users.
 	// Absent → false (paywall off). A bool needs no validation.
-	OnOpenPaywallEnabled bool       `json:"onOpenPaywallEnabled"`
+	OnOpenPaywallEnabled bool `json:"onOpenPaywallEnabled"`
+	// AICaptureDailyLimitFree/Premium are display numbers the client shows in the
+	// capture flow ("N of M left today"). 0 (or absent) = unlimited. They MUST
+	// match the enforcement limits configured for the capture function
+	// (AI_CAPTURE_DAILY_LIMIT_FREE / _PREMIUM env vars) — see api/capture/quota.go.
+	AICaptureDailyLimitFree    int `json:"aiCaptureDailyLimitFree"`
+	AICaptureDailyLimitPremium int `json:"aiCaptureDailyLimitPremium"`
 	// Overrides are evaluated server-side and never served to clients.
 	Overrides []override `json:"overrides,omitempty"`
 }
@@ -68,6 +74,9 @@ func validate(c appConfig) error {
 	if c.Limits.Wallets < 0 || c.Limits.Portfolios < 0 || c.Limits.Categories < 0 || c.Limits.Tags < 0 {
 		return fmt.Errorf("limits must be >= 0")
 	}
+	if c.AICaptureDailyLimitFree < 0 || c.AICaptureDailyLimitPremium < 0 {
+		return fmt.Errorf("aiCapture daily limits must be >= 0")
+	}
 	for k, v := range c.Features {
 		if !validStates[v] {
 			return fmt.Errorf("feature %q has invalid state %q", k, v)
@@ -86,6 +95,12 @@ func validate(c appConfig) error {
 			if v < 0 {
 				return fmt.Errorf("override %d limit %q is negative", i, k)
 			}
+		}
+		if o.AICaptureDailyLimitFree != nil && *o.AICaptureDailyLimitFree < 0 {
+			return fmt.Errorf("override %d aiCaptureDailyLimitFree is negative", i)
+		}
+		if o.AICaptureDailyLimitPremium != nil && *o.AICaptureDailyLimitPremium < 0 {
+			return fmt.Errorf("override %d aiCaptureDailyLimitPremium is negative", i)
 		}
 	}
 	return nil
@@ -176,10 +191,12 @@ type matchRule struct {
 }
 
 type override struct {
-	Match                matchRule         `json:"match"`
-	Features             map[string]string `json:"features"`
-	Limits               map[string]int    `json:"limits"`
-	OnOpenPaywallEnabled *bool             `json:"onOpenPaywallEnabled"`
+	Match                      matchRule         `json:"match"`
+	Features                   map[string]string `json:"features"`
+	Limits                     map[string]int    `json:"limits"`
+	OnOpenPaywallEnabled       *bool             `json:"onOpenPaywallEnabled"`
+	AICaptureDailyLimitFree    *int              `json:"aiCaptureDailyLimitFree"`
+	AICaptureDailyLimitPremium *int              `json:"aiCaptureDailyLimitPremium"`
 }
 
 // applies reports whether every present field of the rule matches the request.
@@ -243,6 +260,12 @@ func resolve(base appConfig, env, version string) appConfig {
 		}
 		if o.OnOpenPaywallEnabled != nil {
 			out.OnOpenPaywallEnabled = *o.OnOpenPaywallEnabled
+		}
+		if o.AICaptureDailyLimitFree != nil {
+			out.AICaptureDailyLimitFree = *o.AICaptureDailyLimitFree
+		}
+		if o.AICaptureDailyLimitPremium != nil {
+			out.AICaptureDailyLimitPremium = *o.AICaptureDailyLimitPremium
 		}
 	}
 	out.Overrides = nil

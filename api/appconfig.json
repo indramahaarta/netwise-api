@@ -13,6 +13,8 @@
     "aiCapture": "off"
   },
   "onOpenPaywallEnabled": false,
+  "aiCaptureDailyLimitFree": 0,
+  "aiCaptureDailyLimitPremium": 0,
   "overrides": [
     {
       "match": { "minVersion": "1.0.2" },

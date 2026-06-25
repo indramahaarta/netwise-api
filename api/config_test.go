@@ -160,9 +160,9 @@ func TestParseUserAgent(t *testing.T) {
 		{"NetWise/1.0.2 (build 47; testflight; iOS 17.5)", "testflight", "1.0.2"},
 		{"NetWise/1.0.0 (build 12; debug; iOS 18.0)", "debug", "1.0.0"},
 		{"NetWise/2.1.0 (build 90; appstore; iOS 17.4)", "appstore", "2.1.0"},
-		{"", "", ""},                          // no header
-		{"Mozilla/5.0", "", ""},               // unrelated UA
-		{"NetWise/1.0.2", "", "1.0.2"},        // version only, no env comment
+		{"", "", ""},                   // no header
+		{"Mozilla/5.0", "", ""},        // unrelated UA
+		{"NetWise/1.0.2", "", "1.0.2"}, // version only, no env comment
 	}
 	for _, c := range cases {
 		env, version := parseUserAgent(c.ua)
@@ -187,10 +187,10 @@ func equalInts(a, b []int) bool {
 
 func TestMatchRuleApplies(t *testing.T) {
 	cases := []struct {
-		name        string
-		m           matchRule
-		env, ver    string
-		want        bool
+		name     string
+		m        matchRule
+		env, ver string
+		want     bool
 	}{
 		{"empty match applies to all", matchRule{}, "appstore", "1.0.0", true},
 		{"env match", matchRule{Env: "testflight"}, "testflight", "1.0.0", true},
@@ -343,5 +343,64 @@ func TestEmbeddedConfigGatesAiCaptureByVersion(t *testing.T) {
 	}
 	if got := resolve(c, "appstore", "1.1.0").Features["aiCapture"]; got != "all" {
 		t.Fatalf("v1.1.0 aiCapture = %q, want all", got)
+	}
+}
+
+// TestServesAICaptureDailyLimitFields pins that the served config carries the
+// two display numbers (so the app reads them rather than its bundled default),
+// both 0 (unlimited) in the shipped config.
+func TestServesAICaptureDailyLimitFields(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	Handler(rec, req)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("response not an object: %v", err)
+	}
+	for _, k := range []string{"aiCaptureDailyLimitFree", "aiCaptureDailyLimitPremium"} {
+		if _, ok := raw[k]; !ok {
+			t.Fatalf("served config missing %s field", k)
+		}
+	}
+
+	var c appConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
+		t.Fatalf("response body not valid config: %v", err)
+	}
+	if c.AICaptureDailyLimitFree != 0 || c.AICaptureDailyLimitPremium != 0 {
+		t.Fatalf("expected both daily limits 0 (unlimited), got free=%d premium=%d",
+			c.AICaptureDailyLimitFree, c.AICaptureDailyLimitPremium)
+	}
+}
+
+func TestValidateRejectsNegativeDailyLimit(t *testing.T) {
+	c := appConfig{SchemaVersion: 1, AICaptureDailyLimitFree: -1}
+	if err := validate(c); err == nil {
+		t.Fatal("expected error for negative aiCaptureDailyLimitFree")
+	}
+}
+
+func TestResolveMergesAICaptureDailyLimitOverride(t *testing.T) {
+	free := 5
+	premium := 50
+	base := appConfig{
+		SchemaVersion: 2,
+		Overrides: []override{
+			{Match: matchRule{Env: "testflight"},
+				AICaptureDailyLimitFree:    &free,
+				AICaptureDailyLimitPremium: &premium},
+		},
+	}
+	got := resolve(base, "testflight", "1.0.3")
+	if got.AICaptureDailyLimitFree != 5 || got.AICaptureDailyLimitPremium != 50 {
+		t.Fatalf("override not applied: free=%d premium=%d",
+			got.AICaptureDailyLimitFree, got.AICaptureDailyLimitPremium)
+	}
+	// No-match env keeps base (0 = unlimited).
+	none := resolve(base, "appstore", "1.0.3")
+	if none.AICaptureDailyLimitFree != 0 || none.AICaptureDailyLimitPremium != 0 {
+		t.Fatalf("non-matching env should keep base 0s, got free=%d premium=%d",
+			none.AICaptureDailyLimitFree, none.AICaptureDailyLimitPremium)
 	}
 }
