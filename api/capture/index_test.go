@@ -112,6 +112,15 @@ func TestSystemPromptIncludesHoldings(t *testing.T) {
 	}
 }
 
+func TestSystemPromptIncludesFeeRule(t *testing.T) {
+	p := buildSystemPrompt(captureRequest{})
+	for _, s := range []string{"COMBINED TOTAL of every trading cost", "VAT/PPN", "net total"} {
+		if !strings.Contains(p, s) {
+			t.Fatalf("prompt missing fee-rule substring %q", s)
+		}
+	}
+}
+
 var errFakeExtractorFailed = &testError{msg: "fake extractor failed"}
 
 type testError struct {
