@@ -241,9 +241,15 @@ func extractionTool() anthropic.ToolParam {
 			"symbol":        str("Bare ticker symbol, e.g. \"INTC\"."),
 			"quantity":      str("Number of shares/units as plain digits."),
 			"pricePerShare": str("Price per share/unit as plain digits."),
-			"fee":           str("Fee as plain digits, or omit."),
-			"note":          str("Short note, usually the merchant/broker named in the text. Omit only if none is present."),
-			"dateTime":      str("REQUIRED. Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). If the text contains no date/time, use the current date/time given in the prompt."),
+			"fee": str("The TOTAL of every trading cost on this trade, combined into ONE plain-digit number: broker " +
+				"commission/brokerage, exchange & clearing fees, regulatory levies (IDX levy, US SEC fee, TAF), taxes " +
+				"(VAT/PPN, GST, stamp duty), and for crypto the trading/maker/taker and network/withdrawal fees. Sum ALL such " +
+				"lines — do not record only one. If the text shows only a net/total amount with no itemized costs, set fee to " +
+				"(total − quantity × pricePerShare) ONLY when that difference is a small positive number. Never put the share " +
+				"value or trade total in fee, and never let fee reach or exceed quantity × pricePerShare. Omit only when no fee " +
+				"is shown and none can be inferred."),
+			"note":     str("Short note, usually the merchant/broker named in the text. Omit only if none is present."),
+			"dateTime": str("REQUIRED. Transaction date/time normalized to ISO-8601 (e.g. \"21 Jun 2026 20:18\" → \"2026-06-21T20:18:00\"). If the text contains no date/time, use the current date/time given in the prompt."),
 		},
 		"required": []any{"targetPortfolioId", "type", "symbol", "quantity", "pricePerShare", "dateTime"},
 	}
@@ -333,6 +339,12 @@ func buildSystemPrompt(req captureRequest) string {
 	b.WriteString("- For a wallet transaction, categoryName is also REQUIRED — pick the closest category from the " +
 		"list (copy the name EXACTLY; never invent a new one).\n")
 	b.WriteString("- amount/quantity/pricePerShare/fee are plain-digit strings (no separators or symbols).\n")
+	b.WriteString("- For a portfolio trade, fee is the COMBINED TOTAL of every trading cost — broker commission/brokerage, " +
+		"exchange/clearing fees, regulatory levies (IDX levy, SEC fee, TAF), and taxes (VAT/PPN, GST, stamp duty); for crypto " +
+		"include trading/maker/taker and network fees. Sum every such line into ONE number — never record just one of them. If " +
+		"the text shows only a net total with no itemized costs, set fee to (total − quantity × pricePerShare) when that yields a " +
+		"small positive amount; otherwise omit it. Never put the share value or trade total in fee, and never let fee reach or " +
+		"exceed quantity × pricePerShare.\n")
 	b.WriteString("- Only set isTransaction true for a clear, concrete financial transaction. For anything else — a " +
 		"random photo, a menu, an article, a chat, or text too garbled to read — set isTransaction to false, give a " +
 		"low confidence, and omit BOTH the wallet and portfolio objects. Never invent a transaction that isn't there.\n")
