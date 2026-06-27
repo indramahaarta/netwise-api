@@ -130,3 +130,32 @@ type testError struct {
 func (e *testError) Error() string {
 	return e.msg
 }
+
+func TestExtractionToolHasTransfer(t *testing.T) {
+	b, err := json.Marshal(extractionTool().InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{"transfer", "sourceWalletId", "destinationWalletId"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("tool schema missing %q", want)
+		}
+	}
+}
+
+func TestCaptureResultDecodesTransfer(t *testing.T) {
+	js := `{"isTransaction":true,"kind":"transfer","confidence":0.9,` +
+		`"transfer":{"sourceWalletId":"w1","destinationWalletId":"w2",` +
+		`"amount":"2000000","note":"to BCA","dateTime":"2026-06-26T02:10:00"}}`
+	var r captureResult
+	if err := json.Unmarshal([]byte(js), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Transfer == nil {
+		t.Fatalf("transfer not decoded")
+	}
+	if r.Transfer.SourceWalletID != "w1" || r.Transfer.DestinationWalletID != "w2" || r.Transfer.Amount != "2000000" {
+		t.Fatalf("bad transfer decode: %+v", r.Transfer)
+	}
+}

@@ -78,12 +78,22 @@ type portfolioExtraction struct {
 	DateTime string  `json:"dateTime"`
 }
 
+type transferExtraction struct {
+	SourceWalletID      string  `json:"sourceWalletId"`
+	DestinationWalletID string  `json:"destinationWalletId"`
+	Amount              string  `json:"amount"`
+	// Note stays optional; DateTime is required (see transferSchema).
+	Note     *string `json:"note"`
+	DateTime string  `json:"dateTime"`
+}
+
 type captureResult struct {
 	IsTransaction bool                 `json:"isTransaction"`
 	Kind          string               `json:"kind"`
 	Confidence    float64              `json:"confidence"`
 	Wallet        *walletExtraction    `json:"wallet"`
 	Portfolio     *portfolioExtraction `json:"portfolio"`
+	Transfer      *transferExtraction  `json:"transfer"`
 }
 
 // requestContext is an alias for context.Context, used in the extractor interface.
@@ -254,6 +264,20 @@ func extractionTool() anthropic.ToolParam {
 		"required": []any{"targetPortfolioId", "type", "symbol", "quantity", "pricePerShare", "dateTime"},
 	}
 
+	transferSchema := map[string]any{
+		"type":                 "object",
+		"description":          "Present only when kind == \"transfer\" — money moved between two of the user's OWN wallets.",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"sourceWalletId":      str("ID of the wallet the money LEAVES — the sender / \"Account Source\" account. Must be one of the provided wallet IDs."),
+			"destinationWalletId": str("ID of the wallet the money ARRIVES in — the recipient/destination account. Must be a DIFFERENT provided wallet ID from sourceWalletId."),
+			"amount":              str("Transferred amount as plain digits only, no separators or currency symbol (e.g. \"2000000\")."),
+			"note":                str("Short description if present in the text. Omit if none."),
+			"dateTime":            str("REQUIRED. Transaction date/time normalized to ISO-8601 (e.g. \"26 Jun 2026 02:10\" → \"2026-06-26T02:10:00\"). If the text has no date/time, use the current date/time given in the prompt."),
+		},
+		"required": []any{"sourceWalletId", "destinationWalletId", "amount", "dateTime"},
+	}
+
 	return anthropic.ToolParam{
 		Name:        extractionToolName,
 		Description: anthropic.String("Record the single financial transaction found in the OCR text. Always call this exactly once."),
@@ -265,8 +289,8 @@ func extractionTool() anthropic.ToolParam {
 					"description": "true only if the text clearly describes one concrete financial transaction.",
 				},
 				"kind": map[string]any{
-					"type": "string", "enum": []any{"wallet", "portfolio"},
-					"description": "\"wallet\" for everyday spending/income; \"portfolio\" for buying/selling securities.",
+					"type": "string", "enum": []any{"wallet", "portfolio", "transfer"},
+					"description": "\"wallet\" for everyday spending/income; \"portfolio\" for buying/selling securities; \"transfer\" for money moved between two of the user's own wallets.",
 				},
 				"confidence": map[string]any{
 					"type":        "number",
@@ -274,6 +298,7 @@ func extractionTool() anthropic.ToolParam {
 				},
 				"wallet":    walletSchema,
 				"portfolio": portfolioSchema,
+				"transfer":  transferSchema,
 			},
 			Required:    []string{"isTransaction", "confidence"},
 			ExtraFields: map[string]any{"additionalProperties": false},
