@@ -159,3 +159,12 @@ func TestCaptureResultDecodesTransfer(t *testing.T) {
 		t.Fatalf("bad transfer decode: %+v", r.Transfer)
 	}
 }
+
+func TestSystemPromptIncludesTransferRule(t *testing.T) {
+	p := buildSystemPrompt(captureRequest{})
+	for _, s := range []string{"SAME person", "Account Source", "NOT a transfer", "destinationWalletId"} {
+		if !strings.Contains(p, s) {
+			t.Fatalf("prompt missing transfer-rule substring %q", s)
+		}
+	}
+}

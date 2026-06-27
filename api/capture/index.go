@@ -363,6 +363,14 @@ func buildSystemPrompt(req captureRequest) string {
 		"date/time, use the current date/time given above.\n")
 	b.WriteString("- For a wallet transaction, categoryName is also REQUIRED — pick the closest category from the " +
 		"list (copy the name EXACTLY; never invent a new one).\n")
+	b.WriteString("- A TRANSFER is money moved between TWO of the user's OWN wallets. The source is the sender / \"Account Source\" " +
+		"account (money leaves it); the destination is the recipient account (money arrives). Emit kind \"transfer\" ONLY when BOTH " +
+		"hold: (a) the source account holder name and the destination account holder name are the SAME person — match names loosely, " +
+		"so \"I MADE INDRA MAHAARTA\" is the same person as \"Indra\", and tolerate OCR noise — AND (b) BOTH the source and destination " +
+		"accounts map to a wallet in the list above. Set sourceWalletId and destinationWalletId (distinct IDs), amount, and dateTime; " +
+		"transfers have NO category.\n")
+	b.WriteString("- If the two holders are DIFFERENT people (you are paying someone else), OR only one side maps to a known wallet, it is " +
+		"NOT a transfer: emit kind \"wallet\" with direction \"expense\" from the source wallet.\n")
 	b.WriteString("- amount/quantity/pricePerShare/fee are plain-digit strings (no separators or symbols).\n")
 	b.WriteString("- For a portfolio trade, fee is the COMBINED TOTAL of every trading cost — broker commission/brokerage, " +
 		"exchange/clearing fees, regulatory levies (IDX levy, SEC fee, TAF), and taxes (VAT/PPN, GST, stamp duty); for crypto " +
