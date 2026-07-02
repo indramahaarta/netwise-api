@@ -318,7 +318,7 @@ func TestResolveMergesOverrides(t *testing.T) {
 }
 
 // TestEmbeddedConfigGatesAiCaptureByVersion pins the shipped policy: aiCapture
-// is on only for app version >= 1.0.1, in every environment. Clients that send
+// is on only for app version >= 1.2, in every environment. Clients that send
 // no User-Agent (old builds) resolve to the base and get it off; the version
 // floor fails closed on an empty/unparseable version.
 func TestEmbeddedConfigGatesAiCaptureByVersion(t *testing.T) {
@@ -332,17 +332,19 @@ func TestEmbeddedConfigGatesAiCaptureByVersion(t *testing.T) {
 		t.Fatalf("no-UA aiCapture = %q, want off", got)
 	}
 	// Below the floor → off.
-	if got := resolve(c, "appstore", "1.0.0").Features["aiCapture"]; got != "off" {
-		t.Fatalf("v1.0.0 aiCapture = %q, want off", got)
+	for _, v := range []string{"1.0.0", "1.0.1", "1.1.0"} {
+		if got := resolve(c, "appstore", v).Features["aiCapture"]; got != "off" {
+			t.Fatalf("v%s aiCapture = %q, want off", v, got)
+		}
 	}
 	// At/after the floor, every env → all.
 	for _, env := range []string{"appstore", "testflight", "debug"} {
-		if got := resolve(c, env, "1.0.1").Features["aiCapture"]; got != "all" {
-			t.Fatalf("%s v1.0.1 aiCapture = %q, want all", env, got)
+		if got := resolve(c, env, "1.2").Features["aiCapture"]; got != "all" {
+			t.Fatalf("%s v1.2 aiCapture = %q, want all", env, got)
 		}
 	}
-	if got := resolve(c, "appstore", "1.1.0").Features["aiCapture"]; got != "all" {
-		t.Fatalf("v1.1.0 aiCapture = %q, want all", got)
+	if got := resolve(c, "appstore", "1.2.1").Features["aiCapture"]; got != "all" {
+		t.Fatalf("v1.2.1 aiCapture = %q, want all", got)
 	}
 }
 

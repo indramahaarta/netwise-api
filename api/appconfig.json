@@ -17,7 +17,7 @@
   "aiCaptureDailyLimitPremium": 0,
   "overrides": [
     {
-      "match": { "minVersion": "1.0.1" },
+      "match": { "minVersion": "1.2" },
       "features": { "aiCapture": "all" }
     }
   ]
