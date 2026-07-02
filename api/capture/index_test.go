@@ -168,3 +168,22 @@ func TestSystemPromptIncludesTransferRule(t *testing.T) {
 		}
 	}
 }
+
+// TestSystemPromptGuardsAgainstFalseTransfers pins the rules that stop
+// person-to-person payments from being tagged as transfers: paying/being paid
+// by another person is never a transfer (even at the same bank/app), a missing
+// holder name fails the transfer test, and incoming money from someone else is
+// income (not just expense).
+func TestSystemPromptGuardsAgainstFalseTransfers(t *testing.T) {
+	p := buildSystemPrompt(captureRequest{})
+	for _, s := range []string{
+		"NEVER a transfer",
+		"DIFFERENT people",
+		"missing or unreadable",
+		"\"income\" into the user's receiving wallet",
+	} {
+		if !strings.Contains(p, s) {
+			t.Fatalf("prompt missing false-transfer guard substring %q", s)
+		}
+	}
+}

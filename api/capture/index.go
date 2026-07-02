@@ -266,7 +266,7 @@ func extractionTool() anthropic.ToolParam {
 
 	transferSchema := map[string]any{
 		"type":                 "object",
-		"description":          "Present only when kind == \"transfer\" — money moved between two of the user's OWN wallets.",
+		"description":          "Present only when kind == \"transfer\" — money moved between two of the user's OWN wallets (the sender and recipient holder names are the SAME person). A payment to or from another person is a wallet expense/income, never a transfer.",
 		"additionalProperties": false,
 		"properties": map[string]any{
 			"sourceWalletId":      str("ID of the wallet the money LEAVES — the sender / \"Account Source\" account. Must be one of the provided wallet IDs."),
@@ -290,7 +290,7 @@ func extractionTool() anthropic.ToolParam {
 				},
 				"kind": map[string]any{
 					"type": "string", "enum": []any{"wallet", "portfolio", "transfer"},
-					"description": "\"wallet\" for everyday spending/income; \"portfolio\" for buying/selling securities; \"transfer\" for money moved between two of the user's own wallets.",
+					"description": "\"wallet\" for everyday spending/income (including paying or being paid by another person); \"portfolio\" for buying/selling securities; \"transfer\" ONLY for money moved between two of the user's own wallets, i.e. sender and recipient holder names are the same person.",
 				},
 				"confidence": map[string]any{
 					"type":        "number",
@@ -363,14 +363,18 @@ func buildSystemPrompt(req captureRequest) string {
 		"date/time, use the current date/time given above.\n")
 	b.WriteString("- For a wallet transaction, categoryName is also REQUIRED — pick the closest category from the " +
 		"list (copy the name EXACTLY; never invent a new one).\n")
-	b.WriteString("- A TRANSFER is money moved between TWO of the user's OWN wallets. The source is the sender / \"Account Source\" " +
-		"account (money leaves it); the destination is the recipient account (money arrives). Emit kind \"transfer\" ONLY when BOTH " +
-		"hold: (a) the source account holder name and the destination account holder name are the SAME person — match names loosely, " +
-		"so \"I MADE INDRA MAHAARTA\" is the same person as \"Indra\", and tolerate OCR noise — AND (b) BOTH the source and destination " +
+	b.WriteString("- A TRANSFER is money the user moved between TWO of their OWN wallets. The source is the sender / \"Account Source\" " +
+		"account (money leaves it); the destination is the recipient account (money arrives). Emit kind \"transfer\" ONLY when ALL " +
+		"hold: (a) the text shows the account holder name on BOTH sides, (b) both names are the SAME person — match names loosely, " +
+		"so \"I MADE INDRA MAHAARTA\" is the same person as \"Indra\", and tolerate OCR noise — AND (c) BOTH the source and destination " +
 		"accounts map to a wallet in the list above. Set sourceWalletId and destinationWalletId (distinct IDs), amount, and dateTime; " +
 		"transfers have NO category.\n")
-	b.WriteString("- If the two holders are DIFFERENT people (you are paying someone else), OR only one side maps to a known wallet, it is " +
-		"NOT a transfer: emit kind \"wallet\" with direction \"expense\" from the source wallet.\n")
+	b.WriteString("- Paying another person, or being paid by another person, is NEVER a transfer — even when their account is at the " +
+		"same bank/app as one of the user's wallets. An account whose holder name is a different person is NOT the user's wallet; " +
+		"never map it to a wallet ID just because the bank or app matches.\n")
+	b.WriteString("- If the two holder names are DIFFERENT people, or either holder name is missing or unreadable, or only one side " +
+		"maps to a known wallet, it is NOT a transfer: emit kind \"wallet\" — direction \"expense\" from the user's sending wallet " +
+		"when the user paid someone, or direction \"income\" into the user's receiving wallet when someone paid the user.\n")
 	b.WriteString("- amount/quantity/pricePerShare/fee are plain-digit strings (no separators or symbols).\n")
 	b.WriteString("- For a portfolio trade, fee is the COMBINED TOTAL of every trading cost — broker commission/brokerage, " +
 		"exchange/clearing fees, regulatory levies (IDX levy, SEC fee, TAF), and taxes (VAT/PPN, GST, stamp duty); for crypto " +
