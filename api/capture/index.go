@@ -78,22 +78,12 @@ type portfolioExtraction struct {
 	DateTime string  `json:"dateTime"`
 }
 
-type transferExtraction struct {
-	SourceWalletID      string  `json:"sourceWalletId"`
-	DestinationWalletID string  `json:"destinationWalletId"`
-	Amount              string  `json:"amount"`
-	// Note stays optional; DateTime is required (see transferSchema).
-	Note     *string `json:"note"`
-	DateTime string  `json:"dateTime"`
-}
-
 type captureResult struct {
 	IsTransaction bool                 `json:"isTransaction"`
 	Kind          string               `json:"kind"`
 	Confidence    float64              `json:"confidence"`
 	Wallet        *walletExtraction    `json:"wallet"`
 	Portfolio     *portfolioExtraction `json:"portfolio"`
-	Transfer      *transferExtraction  `json:"transfer"`
 }
 
 // requestContext is an alias for context.Context, used in the extractor interface.
@@ -264,20 +254,6 @@ func extractionTool() anthropic.ToolParam {
 		"required": []any{"targetPortfolioId", "type", "symbol", "quantity", "pricePerShare", "dateTime"},
 	}
 
-	transferSchema := map[string]any{
-		"type":                 "object",
-		"description":          "Present only when kind == \"transfer\" — money moved between two of the user's OWN wallets (the sender and recipient holder names are the SAME person). A payment to or from another person is a wallet expense/income, never a transfer.",
-		"additionalProperties": false,
-		"properties": map[string]any{
-			"sourceWalletId":      str("ID of the wallet the money LEAVES — the sender / \"Account Source\" account. Must be one of the provided wallet IDs."),
-			"destinationWalletId": str("ID of the wallet the money ARRIVES in — the recipient/destination account. Must be a DIFFERENT provided wallet ID from sourceWalletId."),
-			"amount":              str("Transferred amount as plain digits only, no separators or currency symbol (e.g. \"2000000\")."),
-			"note":                str("Short description if present in the text. Omit if none."),
-			"dateTime":            str("REQUIRED. Transaction date/time normalized to ISO-8601 (e.g. \"26 Jun 2026 02:10\" → \"2026-06-26T02:10:00\"). If the text has no date/time, use the current date/time given in the prompt."),
-		},
-		"required": []any{"sourceWalletId", "destinationWalletId", "amount", "dateTime"},
-	}
-
 	return anthropic.ToolParam{
 		Name:        extractionToolName,
 		Description: anthropic.String("Record the single financial transaction found in the OCR text. Always call this exactly once."),
@@ -289,8 +265,8 @@ func extractionTool() anthropic.ToolParam {
 					"description": "true only if the text clearly describes one concrete financial transaction.",
 				},
 				"kind": map[string]any{
-					"type": "string", "enum": []any{"wallet", "portfolio", "transfer"},
-					"description": "\"wallet\" for everyday spending/income (including paying or being paid by another person); \"portfolio\" for buying/selling securities; \"transfer\" ONLY for money moved between two of the user's own wallets, i.e. sender and recipient holder names are the same person.",
+					"type": "string", "enum": []any{"wallet", "portfolio"},
+					"description": "\"wallet\" for everyday spending/income (including bank/e-wallet transfers to or from anyone); \"portfolio\" for buying/selling securities.",
 				},
 				"confidence": map[string]any{
 					"type":        "number",
@@ -298,7 +274,6 @@ func extractionTool() anthropic.ToolParam {
 				},
 				"wallet":    walletSchema,
 				"portfolio": portfolioSchema,
-				"transfer":  transferSchema,
 			},
 			Required:    []string{"isTransaction", "confidence"},
 			ExtraFields: map[string]any{"additionalProperties": false},
@@ -363,18 +338,9 @@ func buildSystemPrompt(req captureRequest) string {
 		"date/time, use the current date/time given above.\n")
 	b.WriteString("- For a wallet transaction, categoryName is also REQUIRED — pick the closest category from the " +
 		"list (copy the name EXACTLY; never invent a new one).\n")
-	b.WriteString("- A TRANSFER is money the user moved between TWO of their OWN wallets. The source is the sender / \"Account Source\" " +
-		"account (money leaves it); the destination is the recipient account (money arrives). Emit kind \"transfer\" ONLY when ALL " +
-		"hold: (a) the text shows the account holder name on BOTH sides, (b) both names are the SAME person — match names loosely, " +
-		"so \"I MADE INDRA MAHAARTA\" is the same person as \"Indra\", and tolerate OCR noise — AND (c) BOTH the source and destination " +
-		"accounts map to a wallet in the list above. Set sourceWalletId and destinationWalletId (distinct IDs), amount, and dateTime; " +
-		"transfers have NO category.\n")
-	b.WriteString("- Paying another person, or being paid by another person, is NEVER a transfer — even when their account is at the " +
-		"same bank/app as one of the user's wallets. An account whose holder name is a different person is NOT the user's wallet; " +
-		"never map it to a wallet ID just because the bank or app matches.\n")
-	b.WriteString("- If the two holder names are DIFFERENT people, or either holder name is missing or unreadable, or only one side " +
-		"maps to a known wallet, it is NOT a transfer: emit kind \"wallet\" — direction \"expense\" from the user's sending wallet " +
-		"when the user paid someone, or direction \"income\" into the user's receiving wallet when someone paid the user.\n")
+	b.WriteString("- A bank or e-wallet transfer is a normal wallet transaction: direction \"expense\" from the user's sending " +
+		"wallet when money leaves it (the sender / \"Account Source\" side), or direction \"income\" into the user's receiving " +
+		"wallet when money arrives. Pick targetWalletId from whichever side of the transfer belongs to the user.\n")
 	b.WriteString("- amount/quantity/pricePerShare/fee are plain-digit strings (no separators or symbols).\n")
 	b.WriteString("- For a portfolio trade, fee is the COMBINED TOTAL of every trading cost — broker commission/brokerage, " +
 		"exchange/clearing fees, regulatory levies (IDX levy, SEC fee, TAF), and taxes (VAT/PPN, GST, stamp duty); for crypto " +

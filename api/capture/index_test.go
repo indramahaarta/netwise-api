@@ -131,59 +131,38 @@ func (e *testError) Error() string {
 	return e.msg
 }
 
-func TestExtractionToolHasTransfer(t *testing.T) {
+// TestExtractionToolHasNoTransferKind pins the removal of the transfer kind:
+// the model kept misclassifying person-to-person payments as transfers, so the
+// extraction offers only wallet/portfolio and bank transfers land as wallet
+// expense/income. If "transfer" is reintroduced, revisit that decision first.
+func TestExtractionToolHasNoTransferKind(t *testing.T) {
 	b, err := json.Marshal(extractionTool().InputSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// `"transfer"` (quoted) matches the enum value / property key without
+	// tripping on prose like "bank/e-wallet transfers" in descriptions.
 	s := string(b)
-	for _, want := range []string{"transfer", "sourceWalletId", "destinationWalletId"} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("tool schema missing %q", want)
+	for _, banned := range []string{`"transfer"`, "sourceWalletId", "destinationWalletId"} {
+		if strings.Contains(s, banned) {
+			t.Fatalf("tool schema unexpectedly contains %q", banned)
 		}
 	}
 }
 
-func TestCaptureResultDecodesTransfer(t *testing.T) {
-	js := `{"isTransaction":true,"kind":"transfer","confidence":0.9,` +
-		`"transfer":{"sourceWalletId":"w1","destinationWalletId":"w2",` +
-		`"amount":"2000000","note":"to BCA","dateTime":"2026-06-26T02:10:00"}}`
-	var r captureResult
-	if err := json.Unmarshal([]byte(js), &r); err != nil {
-		t.Fatal(err)
-	}
-	if r.Transfer == nil {
-		t.Fatalf("transfer not decoded")
-	}
-	if r.Transfer.SourceWalletID != "w1" || r.Transfer.DestinationWalletID != "w2" || r.Transfer.Amount != "2000000" {
-		t.Fatalf("bad transfer decode: %+v", r.Transfer)
-	}
-}
-
-func TestSystemPromptIncludesTransferRule(t *testing.T) {
-	p := buildSystemPrompt(captureRequest{})
-	for _, s := range []string{"SAME person", "Account Source", "NOT a transfer", "destinationWalletId"} {
-		if !strings.Contains(p, s) {
-			t.Fatalf("prompt missing transfer-rule substring %q", s)
-		}
-	}
-}
-
-// TestSystemPromptGuardsAgainstFalseTransfers pins the rules that stop
-// person-to-person payments from being tagged as transfers: paying/being paid
-// by another person is never a transfer (even at the same bank/app), a missing
-// holder name fails the transfer test, and incoming money from someone else is
-// income (not just expense).
-func TestSystemPromptGuardsAgainstFalseTransfers(t *testing.T) {
+// TestSystemPromptRoutesTransfersToWallet pins that the prompt tells the model
+// to record a bank/e-wallet transfer as a plain wallet transaction, expense
+// from the user's sending wallet or income into the user's receiving wallet.
+func TestSystemPromptRoutesTransfersToWallet(t *testing.T) {
 	p := buildSystemPrompt(captureRequest{})
 	for _, s := range []string{
-		"NEVER a transfer",
-		"DIFFERENT people",
-		"missing or unreadable",
-		"\"income\" into the user's receiving wallet",
+		"normal wallet transaction",
+		"Account Source",
+		"income",
+		"whichever side of the transfer belongs to the user",
 	} {
 		if !strings.Contains(p, s) {
-			t.Fatalf("prompt missing false-transfer guard substring %q", s)
+			t.Fatalf("prompt missing transfer-routing substring %q", s)
 		}
 	}
 }
