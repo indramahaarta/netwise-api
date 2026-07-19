@@ -1,1 +1,4 @@
 .vercel
+
+# Local git worktrees (agent-managed, not shared)
+.worktrees/
