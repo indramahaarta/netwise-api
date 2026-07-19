@@ -33,6 +33,10 @@ type appConfig struct {
 	// (AI_CAPTURE_DAILY_LIMIT_FREE / _PREMIUM env vars) — see api/capture/quota.go.
 	AICaptureDailyLimitFree    int `json:"aiCaptureDailyLimitFree"`
 	AICaptureDailyLimitPremium int `json:"aiCaptureDailyLimitPremium"`
+	// LogoDevToken is the publishable (client-safe) Logo.dev API token used to
+	// fetch stock/ETF logos. Not gated by overrides — it's not a feature flag,
+	// just a rotatable value.
+	LogoDevToken string `json:"logoDevToken"`
 	// Overrides are evaluated server-side and never served to clients.
 	Overrides []override `json:"overrides,omitempty"`
 }

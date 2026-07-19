@@ -376,6 +376,31 @@ func TestServesAICaptureDailyLimitFields(t *testing.T) {
 	}
 }
 
+// TestServesLogoDevTokenField pins that the served config carries a
+// non-empty logoDevToken so the client always has a usable value even if
+// its own bundled default were ever blanked.
+func TestServesLogoDevTokenField(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	rec := httptest.NewRecorder()
+	Handler(rec, req)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("response not an object: %v", err)
+	}
+	if _, ok := raw["logoDevToken"]; !ok {
+		t.Fatalf("served config missing logoDevToken field")
+	}
+
+	var c appConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &c); err != nil {
+		t.Fatalf("response body not valid config: %v", err)
+	}
+	if c.LogoDevToken == "" {
+		t.Fatalf("expected a non-empty logoDevToken in the shipped config")
+	}
+}
+
 func TestValidateRejectsNegativeDailyLimit(t *testing.T) {
 	c := appConfig{SchemaVersion: 1, AICaptureDailyLimitFree: -1}
 	if err := validate(c); err == nil {
