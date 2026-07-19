@@ -15,7 +15,7 @@
   "onOpenPaywallEnabled": false,
   "aiCaptureDailyLimitFree": 0,
   "aiCaptureDailyLimitPremium": 0,
-  "logoDevToken": "pk_REPLACE_WITH_REAL_LOGO_DEV_TOKEN",
+  "logoDevToken": "pk_coOpTjSBTyCtijBEIZf-Qg",
   "overrides": [
     {
       "match": { "minVersion": "1.2" },
