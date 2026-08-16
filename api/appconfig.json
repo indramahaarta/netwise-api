@@ -6,6 +6,7 @@
     "dashboardTopHoldings": "premium",
     "dashboardBestWorst": "premium",
     "dashboardDividendIncome": "premium",
+    "dashboardSpendingByCategory": "all",
     "dashboardSpendingByTag": "premium",
     "dashboardSavingsRate": "premium",
     "dashboardLargestExpenses": "premium",
@@ -20,6 +21,10 @@
     {
       "match": { "minVersion": "1.2" },
       "features": { "aiCapture": "all" }
+    },
+    {
+      "match": { "minVersion": "1.4" },
+      "features": { "dashboardSpendingByCategory": "off" }
     }
   ]
 }
