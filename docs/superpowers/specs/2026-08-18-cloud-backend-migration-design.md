@@ -346,3 +346,55 @@ The four global market tables (`price_quotes`, `price_history`, `fx_rates`, `fx_
 3. Drizzle schema mirroring these tables, plus `attachDatabasePool` over the Supavisor transaction pooler (port 6543) — Phase 0 spike 2, still open.
 4. Configure the Apple auth provider (needs an Apple Services ID and key from the developer account).
 5. Free-tier projects pause after 7 days idle; move to the paid plan before any real user data lands.
+
+---
+
+## Phase 0 complete except Apple auth — 2026-08-19
+
+### Spike 2 — Supabase pool under concurrency: **GO**
+
+Deployed TS function in `sin1`, Drizzle over the Supavisor **transaction** pooler (6543), `attachDatabasePool`, `pool.max = 3`.
+
+| Burst | OK | Failed | Exhaustion | p50 | p95 |
+|---|---|---|---|---|---|
+| 50 | 50 | 0 | 0 | 43 ms | 57 ms |
+| 200 | 200 | 0 | 0 | 83 ms | 145 ms |
+
+200 concurrent queries through 3 connections queued cleanly and drained — `waitingCount` returned to 0, pool never exceeded `max`, zero connection errors. That is the desired failure mode: back-pressure, not collapse.
+
+43 ms p50 for a function→database round trip validates the Singapore co-location call. The same query from `iad1` would have crossed the Pacific twice.
+
+**Decimal precision asserted, not assumed.** `0.1 + 0.2` returns the string `'0.3'` and `21234.75 * 0.5` returns `'10617.375'`. `node-postgres` will hand back NUMERIC as a JS float unless told otherwise, which silently corrupts balances; `types.setTypeParser(1700)` in `lib/db/client.ts` forces strings, and the spike asserts it on every run.
+
+**Three credential traps found the hard way, all now guarded in `scripts/set-database-url.sh`:**
+
+1. `supabase link` caches a pooler URL on **port 5432 (session mode)**. Serverless needs **6543 (transaction mode)**.
+2. That cached URL contains **no password at all** — `postgresql://user@host:5432/postgres`. Copying it produced a `DATABASE_URL` that failed every query with `SASL: client password must be a string`, which reads like an architecture failure and isn't.
+3. `vercel env add <name> preview` requires an explicit git-branch argument to complete non-interactively, and the CLI (54.6.1) suggests a command it then rejects. Pass the branch as the third positional.
+
+The script now URL-encodes the password, asserts the URL parses with a password on 6543, and **connects before writing anything to Vercel**.
+
+### Spike 4 — compute parity: **GREEN**, 23/23
+
+`HoldingsService.swift` ported to `lib/domain/holdings.ts`, pinned against `NetWiseTests/PortfolioFeatureTests.swift` with exact decimal-string assertions (no `toBeCloseTo`).
+
+**The finding that justified doing this before Phase 2:** Swift's `Decimal` carries **38 significant digits**; `decimal.js` defaults to **20**. The app's own suite already pins `100 / 3 = 33.333333333333333333333333333333333333`. On default config every fractional-share buy would have diverged silently from what live users see. `lib/domain/decimal.ts` sets `precision: 38` and `ROUND_HALF_UP` (matching `NSRoundPlain`) and asserts the digit count.
+
+**Preserved deliberately:** `totalInvested = currentQty * avgCost`, computed from the *already-rounded* `avgCost`. Simplifying to `buyCost * currentQty / buyQty` is algebraically identical and numerically different — and the Swift value is the one shipped to users. Also: a `BUY` missing qty or price is skipped entirely rather than contributing a zero, which would drag `avgCost` down and understate cost basis.
+
+Conclusion: **porting the compute to TypeScript is a viable premise for Phase 2**, provided every ported function ships with a parity test built the same way.
+
+### Migrations now in git
+
+`supabase/migrations/` holds all six, extracted verbatim from `supabase_migrations.schema_migrations` by `scripts/dump-migrations.mjs`. Deliberately not `supabase db pull` — that introspects the live schema and discards every comment, and in this schema the comments carry the reasoning.
+
+### Phase 0 scorecard
+
+| Spike | Verdict |
+|---|---|
+| 1 — Yahoo from Vercel egress | **GO** — 61/61 at 122 concurrent; `Mozilla/5.0` is load-bearing |
+| 2 — Supabase pool + Fluid Compute | **GO** — 200/200, p95 145 ms, precision exact |
+| 3 — Sign in with Apple → JWT → RLS | **BLOCKED** — needs an Apple Services ID + signing key |
+| 4 — Compute parity | **GREEN** — 23/23 exact |
+
+Phase 1 may proceed on everything except auth. No paid market-data provider is needed for launch.
