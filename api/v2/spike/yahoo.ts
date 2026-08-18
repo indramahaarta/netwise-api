@@ -36,7 +36,20 @@ const SYMBOLS = [
   'BTC-USD', 'ETH-USD', 'SOL-USD',                // crypto
 ] as const;
 
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36';
+/**
+ * UA matters enormously, and not in the direction you'd guess.
+ *
+ * Measured 2026-08-18 from a residential IP, same second:
+ *   full Chrome UA  -> 429, 3/3
+ *   'Mozilla/5.0'   -> 200, 3/3
+ *
+ * Yahoo now challenges anything claiming to be a real browser (it expects the
+ * cookie + crumb handshake) while still serving the minimal UA. APP_UA is what
+ * NetWise ships today: PriceService.swift:16 sets exactly "Mozilla/5.0".
+ * We probe both so IP reputation and header are isolated.
+ */
+const APP_UA = 'Mozilla/5.0';
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36';
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL ?? '';
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN ?? '';
 const SECRET = process.env.CAPTURE_SHARED_SECRET ?? '';
@@ -44,6 +57,7 @@ const KEY = 'spike:yahoo:v1';
 
 type Attempt = {
   symbol: string;
+  ua: 'app' | 'browser';
   kind: 'chart' | 'search';
   status: number | null;
   ms: number;
@@ -66,12 +80,13 @@ async function redis(...path: string[]): Promise<string | null> {
   }
 }
 
-async function probeChart(symbol: string): Promise<Attempt> {
+async function probeChart(symbol: string, ua: 'app' | 'browser'): Promise<Attempt> {
   const started = Date.now();
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
+  // range=1d matches PriceService.swift:11 exactly.
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': UA, Accept: 'application/json' },
+      headers: { 'User-Agent': ua === 'app' ? APP_UA : BROWSER_UA },
       signal: AbortSignal.timeout(10_000),
     });
     const ms = Date.now() - started;
@@ -82,21 +97,21 @@ async function probeChart(symbol: string): Promise<Attempt> {
     } else {
       await res.text().catch(() => '');
     }
-    return { symbol, kind: 'chart', status: res.status, ms, parsed };
+    return { symbol, ua, kind: 'chart', status: res.status, ms, parsed };
   } catch (e) {
     return {
-      symbol, kind: 'chart', status: null, ms: Date.now() - started, parsed: false,
+      symbol, ua, kind: 'chart', status: null, ms: Date.now() - started, parsed: false,
       error: e instanceof Error ? e.message : String(e),
     };
   }
 }
 
-async function probeSearch(query: string): Promise<Attempt> {
+async function probeSearch(query: string, ua: 'app' | 'browser'): Promise<Attempt> {
   const started = Date.now();
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=6&newsCount=0`;
+  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=10&newsCount=0`;
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': UA, Accept: 'application/json' },
+      headers: { 'User-Agent': ua === 'app' ? APP_UA : BROWSER_UA },
       signal: AbortSignal.timeout(10_000),
     });
     const ms = Date.now() - started;
@@ -107,10 +122,10 @@ async function probeSearch(query: string): Promise<Attempt> {
     } else {
       await res.text().catch(() => '');
     }
-    return { symbol: query, kind: 'search', status: res.status, ms, parsed };
+    return { symbol: query, ua, kind: 'search', status: res.status, ms, parsed };
   } catch (e) {
     return {
-      symbol: query, kind: 'search', status: null, ms: Date.now() - started, parsed: false,
+      symbol: query, ua, kind: 'search', status: null, ms: Date.now() - started, parsed: false,
       error: e instanceof Error ? e.message : String(e),
     };
   }
@@ -158,10 +173,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const picks = Array.from({ length: burst }, (_, i) => SYMBOLS[i % SYMBOLS.length]!);
 
   const attempts = await Promise.all([
-    ...picks.map(probeChart),
-    probeSearch('bank'),
-    probeSearch('BTC'),
+    ...picks.map((sym) => probeChart(sym, 'app')),
+    ...picks.map((sym) => probeChart(sym, 'browser')),
+    probeSearch('bank', 'app'),
+    probeSearch('bank', 'browser'),
   ]);
+
+  const byUa = (u: 'app' | 'browser') => {
+    const set = attempts.filter((a) => a.ua === u);
+    const good = set.filter((a) => a.status === 200 && a.parsed).length;
+    return {
+      requests: set.length,
+      ok: good,
+      okPct: set.length ? Number(((good / set.length) * 100).toFixed(2)) : 0,
+      rateLimited: set.filter((a) => a.status === 429).length,
+      forbidden: set.filter((a) => a.status === 403).length,
+    };
+  };
+  const appStats = byUa('app');
+  const browserStats = byUa('browser');
 
   const ok = attempts.filter((a) => a.status === 200 && a.parsed).length;
   const rateLimited = attempts.filter((a) => a.status === 429).length;
@@ -179,6 +209,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const okPct = (ok / attempts.length) * 100;
   res.status(200).json({
+    egressRegion: process.env.VERCEL_REGION ?? 'unknown',
+    byUserAgent: { app: appStats, browser: browserStats },
+    // The app-UA number is the one that decides Risk A — it is what ships today.
+    verdictAppUA: verdict(appStats.okPct, appStats.forbidden),
     requests: attempts.length,
     ok, rateLimited, forbidden, failed,
     okPct: Number(okPct.toFixed(2)),
