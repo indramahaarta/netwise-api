@@ -2,3 +2,4 @@
 
 # Local git worktrees (agent-managed, not shared)
 .worktrees/
+node_modules
