@@ -308,3 +308,41 @@ Never run `xcodebuild test` or a simulator-targeted build — it wipes the on-de
 **~31 weeks sequential, ~26 with Phases 4/5 overlapped** once the API contract freezes. Roughly six months solo. Phases 2 and 5 carry the risk; Phase 0 decides whether the market-data assumption holds at all.
 
 **First concrete action:** Phase 0 spike 1 — deploy a throwaway Vercel TS function that polls Yahoo at realistic volume and log the 429/403 rate over 48 hours. Everything downstream depends on that answer.
+
+---
+
+## Phase 1 progress — schema applied 2026-08-18
+
+Supabase project **`netwise-v2`** (`itkyospywqydgtahohhq`), region **`ap-southeast-1` (Singapore)**, Postgres 17.6.
+
+Region was a deliberate correction: the first project defaulted to `ap-southeast-2` (Sydney). In a thin client every screen is a round trip, so a Jakarta user against a Sydney stack pays roughly 200ms per screen versus 50–60ms via Singapore, and Supabase cannot move a project after creation. Vercel functions must be pinned to `sin1` to match — they currently run in `iad1`.
+
+Six migrations applied: `001_foundation`, `002_wallet_domain`, `003_portfolio_domain`, `004_snapshots_and_jobs`, `005_global_market_data`, `006_rls_policies`.
+
+Result: 19 tables, 1 view, 15 policies, 19 RLS-enabled tables, 54 indexes. Supabase advisors report zero WARN/ERROR.
+
+### Decisions made while porting the 13 SwiftData models
+
+- **`Portfolio.cash` is gone.** Replaced by a `cash_effect` generated column on `portfolio_transactions` plus the `portfolio_cash` view. The expression is transcribed from `PortfolioModels.swift:54-65` and verified against all eight transaction types plus null-operand and fractional cases — 10/10 exact, including `0.5 × 21234.75 + 2.25 = -10619.625` with no float drift.
+- **`created_at` stays nullable** on wallets, categories, tags and transactions. v1.4 uses `Date.distantPast` and nil as sentinels meaning "seeded default, exempt from premium locking", and `LimitChecker` ranks rows by it. Defaulting to `now()` would silently re-rank every migrated user's data and lock rows that are free today.
+- **`wallet_transactions.amount` stays signed.** v1.4 encodes direction in the sign; every balance is a plain sum. Normalising would change results.
+- **`portfolios.market` is unconstrained.** An old build stamped every portfolio `'US'` regardless of currency, so real data contains codes that contradict the currency. `PortfolioMarket.resolve` repairs this at read time; a check constraint would reject those rows at import.
+- **One live main wallet is now a database guarantee** (partial unique index), replacing `WalletMainService`'s launch-time drift repair.
+- **`snapshot_jobs` coalesces per target while pending**, so a burst of edits to one wallet collapses into a single replay instead of hundreds of overlapping ones.
+- **`migration_jobs.payload` is revoked from `authenticated`** — it holds a user's entire ledger as raw JSON and never needs to travel back over the wire.
+
+### RLS posture: `authenticated` is SELECT-only, everywhere
+
+Not merely least privilege — required for correctness. Every invariant that keeps the ledger sound lives in application code, not constraints: `TransactionValidator`'s insufficient-cash and insufficient-holdings checks, creating both halves of a transfer pair, the portfolio-deposit counterpart, the pair-cascade soft delete. A client able to INSERT directly would bypass all of them and could sell shares it does not hold.
+
+All writes go through Vercel functions using `service_role`. The policies are the backstop that makes a leaked anon key a read-only incident scoped to one user.
+
+The four global market tables (`price_quotes`, `price_history`, `fx_rates`, `fx_history`) have RLS enabled with **no** policies — deny-all to anon and authenticated, `service_role` bypasses. Supabase's linter flags these as INFO `rls_enabled_no_policy`; that is the intended design, not a gap.
+
+### Open items before Phase 1 closes
+
+1. Pin Vercel functions to `sin1` and enable Fluid Compute in `vercel.json`.
+2. Link the Supabase CLI so migrations live in `supabase/migrations/` under git, not only in Supabase's migration history. Needs the database password.
+3. Drizzle schema mirroring these tables, plus `attachDatabasePool` over the Supavisor transaction pooler (port 6543) — Phase 0 spike 2, still open.
+4. Configure the Apple auth provider (needs an Apple Services ID and key from the developer account).
+5. Free-tier projects pause after 7 days idle; move to the paid plan before any real user data lands.
