@@ -33,15 +33,38 @@ That architecture has hit three walls:
 
 ## Two risks that can kill this — resolve in Phase 0, before anything else
 
-### Risk A: Yahoo Finance will not tolerate server-side traffic
+### Risk A — RESOLVED 2026-08-18: Yahoo tolerates Vercel egress. The variable was the User-Agent.
 
-Today `PriceService` and `PriceStore` fetch `query1.finance.yahoo.com` **from each user's phone** — thousands of residential IPs, naturally distributed, no single-source rate limit. Moving to the server routes every price and every historical close through a handful of Vercel egress IPs. Yahoo's unofficial endpoints throttle and block datacenter ranges aggressively.
+**Measured**, not assumed. Probe: `api/v2/spike/yahoo.ts`, deployed to a preview, egress `iad1`.
 
-This is not a tuning problem. If it fails, the entire price/snapshot pipeline fails, and it will fail at scale — after the client rewrite is done.
+| User-Agent | Requests | OK | 429 |
+|---|---|---|---|
+| `Mozilla/5.0` — what `PriceService.swift:16` ships | 61 | **61 (100%)** | 0 |
+| Full Chrome UA string | 61 | 5 (8.2%) | 56 |
 
-**Phase 0 must answer it:** hammer the Yahoo v8/chart and v1/search endpoints from a deployed Vercel function at realistic volume for 48h and watch for 429/403. Budget for the likely outcome: a paid market-data provider (Twelve Data, Finnhub, or EOD Historical) behind a provider-agnostic `lib/market/` interface. Write that interface from day one regardless, so swapping providers is a config change.
+122 concurrent requests in a single burst from one Vercel IP, p50 354ms, p95 477ms. No 403 at any point.
 
-`ForexService` (open.er-api.com) is lower risk — it is a public API designed for server callers — but goes behind the same interface.
+The counter-intuitive finding: **Yahoo challenges anything claiming to be a real browser** — it expects those to carry the cookie + crumb handshake — **and still serves the minimal UA cleanly.** An earlier probe run reported 0/20 and a NO-GO; that was the probe sending a full Chrome UA, not a signal about egress IPs. Reproduced from a residential IP in the same second: full Chrome UA 429 3/3, `Mozilla/5.0` 200 3/3.
+
+**Consequences:**
+
+1. **No paid market-data provider is needed for launch.** Keep Yahoo.
+2. **The `Mozilla/5.0` UA is load-bearing.** Pin it in `lib/market/yahoo.ts` with a comment and a test. "Tidying" it into a realistic browser string silently breaks all pricing.
+3. **`MarketDataProvider` / `FxProvider` stay** (`lib/market/types.ts`). Yahoo is unofficial and can change without notice; the interface keeps a provider swap a config change. Budget a paid provider as a contingency, not a line item.
+4. Re-run the probe on a cron before launch to confirm the result holds over days, not minutes.
+
+**Also resolved in the same deploy:** Go and TypeScript coexist in one Vercel project — the build produced `{"provided":2,"nodejs":1}` (2 Go functions + 1 Node function) in 7s. Phase 7's assumption holds, so the Go endpoints can be ported last rather than up front.
+
+### Global market-data cache
+
+Yahoo tolerating the load does not mean we should generate it. Today every device fetches independently; server-side, one fetch serves everyone. Four rules, in descending order of impact:
+
+1. **Lazy read-through, never scheduled refresh.** Only fetch a symbol when someone actually asks for it. A symbol nobody is looking at costs nothing. With a small user base this dominates every other optimisation.
+2. **Historical closes cache forever.** A closed day's close never changes, so `price_history(symbol, date) -> close` is written once and read for all time. This is the bigger win than quote caching, because snapshot replay walks day-by-day across every symbol — it is exactly the workload that made the on-device version slow.
+3. **15-minute TTL on live quotes, market-hours aware.** 15 minutes matches `PriceStore`'s existing client TTL, so user-visible freshness does not change. Outside market hours the price cannot move, so extend the TTL to the next exchange open — a US symbol only needs 15-minute refresh during 32.5 of the week's 168 hours, roughly a 5× reduction. Crypto trades 24/7 and stays on a flat 15 minutes.
+4. **Single-flight on cache miss.** When a TTL expires, 50 concurrent requests for AAPL must produce one upstream fetch, not 50. A Redis `SET NX` lock with a short expiry; losers wait briefly and read the filled cache.
+
+FX gets the same treatment: 1-hour TTL on live rates (matching `ForexService` today), permanent cache for historical daily rates.
 
 ### Risk B: silently changing users' numbers
 
