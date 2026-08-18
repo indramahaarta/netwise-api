@@ -2,7 +2,9 @@
   "name": "netwise-api",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -10,6 +12,7 @@
     "db:dump": "node scripts/dump-migrations.mjs"
   },
   "dependencies": {
+    "@js-temporal/polyfill": "^0.5.1",
     "@vercel/functions": "^2.2.0",
     "decimal.js": "^10.4.3",
     "drizzle-orm": "^0.38.3",
