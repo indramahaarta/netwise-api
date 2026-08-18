@@ -6,10 +6,18 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:dump": "node scripts/dump-migrations.mjs"
+  },
+  "dependencies": {
+    "@vercel/functions": "^2.2.0",
+    "decimal.js": "^10.4.3",
+    "drizzle-orm": "^0.38.3",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
     "@vercel/node": "^5.1.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
