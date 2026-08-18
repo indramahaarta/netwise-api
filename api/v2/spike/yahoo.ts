@@ -124,7 +124,14 @@ function verdict(okPct: number, forbidden: number): string {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!SECRET || req.headers['x-netwise-key'] !== SECRET) {
+  // Never runs in production. This is a preview-only throwaway; previews are
+  // already behind Vercel deployment protection, which is the real gate.
+  if (process.env.VERCEL_ENV === 'production') {
+    res.status(404).send('not found');
+    return;
+  }
+  // If a secret IS configured for this environment, still require it.
+  if (SECRET && req.headers['x-netwise-key'] !== SECRET) {
     res.status(401).send('unauthorized');
     return;
   }
