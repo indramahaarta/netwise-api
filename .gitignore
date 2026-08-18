@@ -3,3 +3,6 @@
 # Local git worktrees (agent-managed, not shared)
 .worktrees/
 node_modules
+
+# Supabase CLI link state (contains pooler credentials)
+supabase/.temp/
