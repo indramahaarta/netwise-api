@@ -16,6 +16,7 @@
     "@vercel/functions": "^2.2.0",
     "decimal.js": "^10.4.3",
     "drizzle-orm": "^0.38.3",
+    "jose": "^6.2.9",
     "pg": "^8.13.1"
   },
   "devDependencies": {
