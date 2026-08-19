@@ -70,8 +70,32 @@ suite('spike 3 — JWT verification and RLS scoping', () => {
   it('the verified subject sees only its own rows under RLS', async () => {
     const client = new pg.Client({ connectionString: conn!, ssl: { rejectUnauthorized: false } });
     await client.connect();
+
+    // Self-provisioning rather than relying on a fixture, so this runs against
+    // ANY valid token — including a real Sign in with Apple session lifted from
+    // the running app.
+    const DECOY_USER = 'ffffffff-0000-4000-8000-00000000000f';
+    const MINE = 'ffffffff-1111-4000-8000-000000000011';
+    const THEIRS = 'ffffffff-2222-4000-8000-000000000022';
+
     try {
       const ctx = await verifyRequest({ authorization: `Bearer ${token}` });
+
+      await client.query(`delete from public.wallets where id = any($1::uuid[])`, [[MINE, THEIRS]]);
+      await client.query(`delete from auth.users where id = $1`, [DECOY_USER]);
+      await client.query(
+        `insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                                 email_confirmed_at, created_at, updated_at,
+                                 raw_app_meta_data, raw_user_meta_data)
+         values ($1,'00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+                 'rls-decoy@netwise.local','',now(),now(),now(),'{}'::jsonb,'{}'::jsonb)`,
+        [DECOY_USER],
+      );
+      await client.query(
+        `insert into public.wallets (id, user_id, name, currency)
+         values ($1,$2,'Mine','IDR'), ($3,$4,'Not mine','USD')`,
+        [MINE, ctx.userId, THEIRS, DECOY_USER],
+      );
 
       // SET LOCAL inside a transaction — see the note in test/rls/isolation.ts.
       // Session-level SET is lost through the transaction pooler and the query
@@ -81,12 +105,17 @@ suite('spike 3 — JWT verification and RLS scoping', () => {
       await client.query(
         `set local request.jwt.claims = '${JSON.stringify({ sub: ctx.userId, role: 'authenticated' })}'`,
       );
-      const { rows } = await client.query<{ name: string }>('select name from public.wallets');
+      const { rows } = await client.query<{ name: string }>(
+        `select name from public.wallets where id = any($1::uuid[]) order by name`,
+        [[MINE, THEIRS]],
+      );
       await client.query('commit');
 
-      // Two wallets exist in the table; the token must reach exactly one.
-      expect(rows.map((r) => r.name)).toEqual(['Spike wallet']);
+      // Both rows exist and the query does not filter by user — only RLS does.
+      expect(rows.map((r) => r.name)).toEqual(['Mine']);
     } finally {
+      await client.query(`delete from public.wallets where id = any($1::uuid[])`, [[MINE, THEIRS]]).catch(() => {});
+      await client.query(`delete from auth.users where id = $1`, [DECOY_USER]).catch(() => {});
       await client.end();
     }
   });
