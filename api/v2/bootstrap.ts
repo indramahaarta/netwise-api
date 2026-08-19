@@ -113,12 +113,24 @@ export default withAuth(['GET'], async (req: VercelRequest, res: VercelResponse,
         [auth.userId],
       ),
 
-      client.query<{ wallets: string; portfolios: string; categories: string; tags: string }>(
+      // Category counting mirrors CategoryManagementView exactly: the limit
+      // applies PER TYPE (income vs expense) and EXCLUDES system categories.
+      // Counting all ten seeded rows against a limit of eight would leave every
+      // new free account unable to create a single category — the two catch-alls
+      // ("Other Income" / "Other Expense") are system rows and never count.
+      client.query<{
+        wallets: string; portfolios: string; tags: string;
+        categories: string; income_categories: string; expense_categories: string;
+      }>(
         `select
-           (select count(*)::text from public.wallets           where user_id = $1 and deleted_at is null) as wallets,
-           (select count(*)::text from public.portfolios        where user_id = $1 and deleted_at is null) as portfolios,
+           (select count(*)::text from public.wallets    where user_id = $1 and deleted_at is null) as wallets,
+           (select count(*)::text from public.portfolios where user_id = $1 and deleted_at is null) as portfolios,
+           (select count(*)::text from public.wallet_tags where user_id = $1) as tags,
            (select count(*)::text from public.wallet_categories where user_id = $1) as categories,
-           (select count(*)::text from public.wallet_tags       where user_id = $1) as tags`,
+           (select count(*)::text from public.wallet_categories
+             where user_id = $1 and not is_system and is_income)     as income_categories,
+           (select count(*)::text from public.wallet_categories
+             where user_id = $1 and not is_system and not is_income) as expense_categories`,
         [auth.userId],
       ),
     ]);
@@ -157,14 +169,17 @@ export default withAuth(['GET'], async (req: VercelRequest, res: VercelResponse,
       canCreate: {
         wallet:    canCreate(Number(c.wallets),    DEFAULT_LIMITS.wallets,    isPremium),
         portfolio: canCreate(Number(c.portfolios), DEFAULT_LIMITS.portfolios, isPremium),
-        category:  canCreate(Number(c.categories), DEFAULT_LIMITS.categories, isPremium),
         tag:       canCreate(Number(c.tags),       DEFAULT_LIMITS.tags,       isPremium),
+        incomeCategory:  canCreate(Number(c.income_categories),  DEFAULT_LIMITS.categories, isPremium),
+        expenseCategory: canCreate(Number(c.expense_categories), DEFAULT_LIMITS.categories, isPremium),
       },
       counts: {
         wallets: Number(c.wallets),
         portfolios: Number(c.portfolios),
-        categories: Number(c.categories),
         tags: Number(c.tags),
+        categories: Number(c.categories),
+        incomeCategories: Number(c.income_categories),
+        expenseCategories: Number(c.expense_categories),
       },
       wallets: wallets.rows.map((w) => ({
         id: w.id,
