@@ -32,16 +32,31 @@ const suite = conn ? describe : describe.skip;
 suite('RLS isolation (live database)', () => {
   let client: pg.Client;
 
-  /** Run a query as `authenticated` with the given subject's JWT claims. */
+  /**
+   * Run a query as `authenticated` with the given subject's JWT claims.
+   *
+   * MUST be an explicit transaction with SET LOCAL, not session-level SET.
+   * We connect through Supabase's TRANSACTION pooler, where each statement can
+   * be handed to a different backend — a session-level `set role` is therefore
+   * silently dropped before the next statement runs, and the query executes
+   * unscoped. That is a total RLS bypass, and it fails open: you get MORE rows,
+   * not an error. A transaction is pinned to one backend for its duration, so
+   * SET LOCAL holds. This bit us for real: these tests passed in isolation and
+   * returned every user's wallets the moment two files ran concurrently.
+   */
   async function asUser<T extends pg.QueryResultRow>(sub: string, sql: string): Promise<T[]> {
-    await client.query('set role authenticated');
-    await client.query(`set request.jwt.claims = '${JSON.stringify({ sub, role: 'authenticated' })}'`);
+    await client.query('begin');
     try {
+      await client.query('set local role authenticated');
+      await client.query(
+        `set local request.jwt.claims = '${JSON.stringify({ sub, role: 'authenticated' })}'`,
+      );
       const r = await client.query<T>(sql);
+      await client.query('commit');
       return r.rows;
-    } finally {
-      await client.query('reset role');
-      await client.query('reset request.jwt.claims');
+    } catch (e) {
+      await client.query('rollback').catch(() => {});
+      throw e;
     }
   }
 

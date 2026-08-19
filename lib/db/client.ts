@@ -88,3 +88,48 @@ export function poolStats() {
     waiting: pool.waitingCount,
   };
 }
+
+/**
+ * Run a callback with the connection scoped to one user's RLS context.
+ *
+ * READ THE TRANSACTION NOTE BEFORE CHANGING THIS.
+ *
+ * `SET role` and `SET request.jwt.claims` are SESSION-level. We connect through
+ * Supabase's transaction-mode pooler, where consecutive statements can be served
+ * by different backends — so a session-level SET is silently dropped and the
+ * following query runs UNSCOPED.
+ *
+ * That failure mode is the dangerous kind: it fails OPEN. No error is raised;
+ * the query simply returns every user's rows. It is also load-dependent, so it
+ * looks fine in testing and breaks under concurrency. We hit exactly this — the
+ * RLS suite passed in isolation and returned all users' wallets the moment a
+ * second test file ran alongside it.
+ *
+ * An explicit transaction is pinned to a single backend for its lifetime, so
+ * SET LOCAL holds for every statement inside it and is discarded on COMMIT.
+ *
+ * Note the v2 API normally reaches Postgres as service_role and scopes by an
+ * explicit `where user_id = $1`, with RLS as defence in depth rather than the
+ * primary control. Use this helper for anything that does rely on RLS.
+ */
+export async function withUserScope<T>(
+  userId: string,
+  fn: (client: import('pg').PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    await client.query('set local role authenticated');
+    await client.query('set local request.jwt.claims = $1', [
+      JSON.stringify({ sub: userId, role: 'authenticated' }),
+    ]);
+    const result = await fn(client);
+    await client.query('commit');
+    return result;
+  } catch (error) {
+    await client.query('rollback').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
