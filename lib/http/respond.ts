@@ -34,6 +34,11 @@ export function json(req: VercelRequest, res: VercelResponse, body: unknown, max
 
   res.setHeader('ETag', etag);
   res.setHeader('Cache-Control', `private, max-age=${maxAge}`);
+  // Server time belongs in a header, never the body. The ETag is a hash OF the
+  // body, so a timestamp inside it changes the hash on every request and the
+  // client can never get a 304 — the caching is silently dead while looking
+  // implemented. Headers are outside the hash.
+  res.setHeader('X-NetWise-Server-Time', new Date().toISOString());
 
   if (req.headers['if-none-match'] === etag) {
     res.status(304).end();

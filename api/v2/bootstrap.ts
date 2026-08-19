@@ -192,7 +192,8 @@ export default withAuth(['GET'], async (req: VercelRequest, res: VercelResponse,
       })),
       portfolios: portfolios.rows,
       isNewAccount: provision.created,
-      serverTime: new Date().toISOString(),
+      // serverTime is returned as the X-NetWise-Server-Time header, not here —
+      // see the note in lib/http/respond.ts about it defeating the ETag.
     });
   } catch (error) {
     await client.query('rollback').catch(() => {});
